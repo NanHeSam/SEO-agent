@@ -121,7 +121,10 @@ def scrape(
 ):
     """Scrape existing blog content for a category."""
     settings = get_settings()
-    scraper = BlogScraper(base_url=settings.target_blog_url)
+    scraper = BlogScraper(
+        base_url=settings.target_blog_url,
+        sitemap_url=settings.target_sitemap_url,
+    )
 
     async def run():
         # Check for cached content

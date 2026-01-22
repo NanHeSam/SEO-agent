@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     target_blog_url: str = Field(
         default="https://jobnova.ai/blog", description="Target blog URL to analyze"
     )
+    target_sitemap_url: str = Field(
+        default="https://jobnova.ai/sitemap.xml", description="Sitemap URL for blog discovery"
+    )
 
     # Keyword research defaults
     default_min_volume: int = Field(

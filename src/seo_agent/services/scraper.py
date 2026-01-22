@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup
@@ -18,10 +20,172 @@ class BlogScraper:
     def __init__(
         self,
         base_url: str = "https://jobnova.ai/blog",
+        sitemap_url: str = "https://jobnova.ai/sitemap.xml",
         timeout: float = 30.0,
     ):
         self.base_url = base_url.rstrip("/")
+        self.sitemap_url = sitemap_url
         self.timeout = timeout
+
+    async def fetch_urls_from_sitemap(self, max_urls: int = 100) -> list[str]:
+        """Fetch blog post URLs from sitemap.xml."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.get(self.sitemap_url)
+                if response.status_code != 200:
+                    return []
+
+                return self._parse_sitemap(response.text, max_urls)
+            except httpx.HTTPError:
+                return []
+
+    def _parse_sitemap(self, xml_content: str, max_urls: int) -> list[str]:
+        """Parse sitemap XML and extract blog post URLs."""
+        urls = []
+        try:
+            # Handle namespaced XML
+            # Remove namespace for easier parsing
+            xml_content = re.sub(r'\sxmlns="[^"]+"', '', xml_content, count=1)
+            root = ElementTree.fromstring(xml_content)
+
+            # Handle both sitemap index and regular sitemap
+            # Check if this is a sitemap index (contains other sitemaps)
+            sitemap_refs = root.findall('.//sitemap/loc')
+            if sitemap_refs:
+                # This is a sitemap index, we'll just get direct URLs for now
+                pass
+
+            # Find all URL locations
+            for loc in root.findall('.//url/loc'):
+                url = loc.text
+                if url:
+                    # Parse the URL path
+                    parsed = urlparse(url)
+                    path = parsed.path.rstrip('/')
+
+                    # Filter for blog post URLs: must have /blog/ followed by a slug
+                    # e.g., /blog/my-post-title (not just /blog)
+                    if '/blog/' in path and path != '/blog':
+                        urls.append(url)
+                    elif '/article/' in path or '/post/' in path:
+                        urls.append(url)
+
+                if len(urls) >= max_urls:
+                    break
+
+        except ElementTree.ParseError:
+            pass
+
+        return urls[:max_urls]
+
+    async def scrape_posts_from_sitemap(self, max_posts: int = 100) -> list[ExistingPost]:
+        """Get post information from URLs found in sitemap.
+
+        For SPAs that render content client-side, this extracts metadata
+        from the URL slug rather than scraping page content.
+        """
+        urls = await self.fetch_urls_from_sitemap(max_urls=max_posts)
+
+        if not urls:
+            return []
+
+        posts = []
+        for url in urls:
+            post = self._extract_post_from_url(url)
+            if post:
+                posts.append(post)
+
+        return posts
+
+    def _extract_post_from_url(self, url: str) -> ExistingPost | None:
+        """Extract post metadata from URL (for SPA sites)."""
+        parsed = urlparse(url)
+        path = parsed.path.rstrip('/')
+
+        # Get the slug from the URL path
+        # e.g., /blog/my-post-title -> my-post-title
+        parts = path.split('/')
+        if len(parts) < 2:
+            return None
+
+        slug = parts[-1]
+        if not slug:
+            return None
+
+        # Convert slug to title
+        # e.g., "in-demand-jobs-in-canada-2026" -> "In Demand Jobs In Canada 2026"
+        title = self._slug_to_title(slug)
+
+        # Try to extract category from URL structure
+        category = ""
+        if len(parts) > 2 and parts[-2] != "blog":
+            category = parts[-2]
+
+        return ExistingPost(
+            title=title,
+            url=url,
+            category=category,
+            excerpt="",
+            published_date=None,
+        )
+
+    def _slug_to_title(self, slug: str) -> str:
+        """Convert URL slug to readable title."""
+        # Replace hyphens with spaces
+        title = slug.replace('-', ' ').replace('_', ' ')
+        # Remove common URL artifacts
+        title = re.sub(r'\s+', ' ', title)
+        # Title case
+        title = title.title()
+        return title
+
+    def _extract_post_metadata(self, html: str, url: str) -> ExistingPost | None:
+        """Extract post metadata from a page."""
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get title from various sources
+        title = None
+
+        # Try meta og:title first
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"]
+
+        # Try page title
+        if not title:
+            title_elem = soup.find("title")
+            if title_elem:
+                title = title_elem.get_text(strip=True)
+
+        # Try h1
+        if not title:
+            h1 = soup.find("h1")
+            if h1:
+                title = h1.get_text(strip=True)
+
+        if not title:
+            return None
+
+        # Get excerpt from meta description
+        excerpt = ""
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        if meta_desc and meta_desc.get("content"):
+            excerpt = meta_desc["content"][:300]
+
+        # Try to extract category from URL or breadcrumbs
+        category = ""
+        parsed_url = urlparse(url)
+        path_parts = parsed_url.path.strip("/").split("/")
+        if len(path_parts) > 1 and path_parts[0] == "blog":
+            category = path_parts[1] if len(path_parts) > 2 else ""
+
+        return ExistingPost(
+            title=title,
+            url=url,
+            category=category,
+            excerpt=excerpt,
+            published_date=None,
+        )
 
     async def scrape_category(
         self,
@@ -41,7 +205,13 @@ class BlogScraper:
         )
 
     async def scrape_all_posts(self, max_posts: int = 100) -> list[ExistingPost]:
-        """Scrape all posts from the blog."""
+        """Scrape all posts from the blog using sitemap."""
+        # Use sitemap as primary method
+        posts = await self.scrape_posts_from_sitemap(max_posts=max_posts)
+        if posts:
+            return posts
+
+        # Fallback to category pages if sitemap fails
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             return await self._scrape_category_pages(client, self.base_url, max_posts)
 
@@ -264,6 +434,9 @@ class BlogScraper:
             return None
 
 
-def create_scraper(base_url: str = "https://jobnova.ai/blog") -> BlogScraper:
+def create_scraper(
+    base_url: str = "https://jobnova.ai/blog",
+    sitemap_url: str = "https://jobnova.ai/sitemap.xml",
+) -> BlogScraper:
     """Factory function to create a blog scraper."""
-    return BlogScraper(base_url=base_url)
+    return BlogScraper(base_url=base_url, sitemap_url=sitemap_url)

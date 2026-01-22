@@ -45,7 +45,10 @@ class WorkflowOrchestrator:
         )
 
         # Initialize services
-        self.scraper = BlogScraper(base_url=settings.target_blog_url)
+        self.scraper = BlogScraper(
+            base_url=settings.target_blog_url,
+            sitemap_url=settings.target_sitemap_url,
+        )
         self.keyword_service = KeywordResearchService(
             dataforseo_client=self.dataforseo_client,
             openai_client=self.openai_client,
@@ -317,18 +320,39 @@ class WorkflowOrchestrator:
         return article
 
     async def _scrape_or_load(self, category: str) -> ScrapedContent | None:
-        """Load cached content or scrape fresh."""
-        # Try to load cached
+        """Load cached content or scrape fresh from sitemap."""
+        from datetime import datetime
+        from seo_agent.models.blog_post import ScrapedContent
+
+        # Try to load cached content for this category
         cached = self.scraper.load_scraped_content(
             category=category,
             data_dir=self.settings.existing_content_dir,
         )
 
         if cached:
+            console.print(f"[dim]Loaded {len(cached.posts)} cached posts[/dim]")
             return cached
 
-        # Scrape fresh
-        scraped = await self.scraper.scrape_category(category)
+        # Scrape fresh from sitemap (gets all blog posts)
+        console.print(f"[dim]Fetching posts from sitemap: {self.scraper.sitemap_url}[/dim]")
+        posts = await self.scraper.scrape_all_posts(max_posts=100)
+        console.print(f"[dim]Found {len(posts)} posts from sitemap[/dim]")
+
+        if posts:
+            for post in posts[:5]:
+                console.print(f"[dim]  - {post.title}[/dim]")
+            if len(posts) > 5:
+                console.print(f"[dim]  ... and {len(posts) - 5} more[/dim]")
+
+        # Create ScrapedContent with the posts
+        scraped = ScrapedContent(
+            category=category,
+            posts=posts,
+            scraped_at=datetime.now(),
+        )
+
+        # Save for future use
         await self.scraper.save_scraped_content(
             content=scraped,
             output_dir=self.settings.existing_content_dir,

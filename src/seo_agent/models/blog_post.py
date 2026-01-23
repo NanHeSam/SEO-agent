@@ -2,7 +2,46 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, ConfigDict
+
+
+class ApiBlogPost(BaseModel):
+    """Represents a blog post from the Libaspace Blog API."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    slug: str
+    title: str
+    summary: str = ""
+    content: str = ""  # Only populated with --include-content
+    seo_title: str = Field(default="", alias="seoTitle")
+    seo_description: str = Field(default="", alias="seoDescription")
+    keywords: str = ""  # API returns string, not list
+    cover_url: str = Field(default="", alias="coverUrl")
+    publish_time: int = Field(default=0, alias="publishTime")
+    author: str = ""
+
+    @property
+    def url(self) -> str:
+        """Generate the full URL for this post."""
+        return f"https://jobnova.ai/blog/{self.slug}"
+
+    @property
+    def keyword_list(self) -> list[str]:
+        """Parse keywords string into a list."""
+        if not self.keywords:
+            return []
+        return [k.strip() for k in self.keywords.split(",") if k.strip()]
+
+
+class BlogCache(BaseModel):
+    """Cache for blog posts fetched from API."""
+
+    posts: list[ApiBlogPost]
+    fetched_at: datetime
+    total_count: int
+    include_content: bool = False
 
 
 class ExistingPost(BaseModel):

@@ -6,6 +6,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from seo_agent.core.workflow_logger import get_logger
+
 
 class OpenAIClient:
     """Client for OpenAI API (GPT-5.2 + image generation)."""
@@ -43,17 +45,31 @@ class OpenAIClient:
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        operation_name: str = "llm_call",
     ) -> str:
         """Generate completion with a system and user prompt."""
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return await self.chat_completion(
+        response = await self.chat_completion(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+
+        # Log the LLM call
+        logger = get_logger()
+        if logger:
+            logger.log_llm_call(
+                operation=operation_name,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response=response,
+                model=self.model,
+            )
+
+        return response
 
     async def suggest_keywords(
         self,
@@ -85,6 +101,7 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.8,
+            operation_name="suggest_keywords",
         )
 
         # Parse JSON array from response
@@ -95,11 +112,25 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
             if clean_response.startswith("```"):
                 clean_response = clean_response.split("\n", 1)[1]
                 clean_response = clean_response.rsplit("```", 1)[0]
-            return json.loads(clean_response)
+            keywords = json.loads(clean_response)
+
+            # Log parsed keywords
+            logger = get_logger()
+            if logger:
+                logger.log_keywords_suggested(keywords, source="gpt")
+
+            return keywords
         except json.JSONDecodeError:
             # Fallback: try to extract keywords from text
             lines = response.strip().split("\n")
-            return [line.strip().strip("-").strip('"').strip("'") for line in lines if line.strip()]
+            keywords = [line.strip().strip("-").strip('"').strip("'") for line in lines if line.strip()]
+
+            # Log parsed keywords
+            logger = get_logger()
+            if logger:
+                logger.log_keywords_suggested(keywords, source="gpt_fallback")
+
+            return keywords
 
     async def suggest_topic(
         self,
@@ -143,6 +174,7 @@ Return JSON with this exact format:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.8,
+            operation_name="suggest_topic",
         )
 
         import json
@@ -224,6 +256,7 @@ Then the full article in Markdown format."""
             user_prompt=user_prompt,
             temperature=0.7,
             max_tokens=8192,
+            operation_name="generate_article",
         )
 
         # Parse the response to extract frontmatter and content
@@ -363,7 +396,109 @@ Return ONLY the image prompt (1-2 sentences)."""
             user_prompt=user_prompt,
             temperature=0.7,
             max_tokens=200,
+            operation_name="generate_image_prompt",
         )
+
+    async def suggest_topics_and_keywords(
+        self,
+        existing_posts: list[dict],  # [{title, summary, content?}]
+        suggestion_count: int = 10,
+    ) -> dict:
+        """
+        Analyze existing blog content and suggest new topics and keywords.
+
+        Returns:
+            {
+                "topic_ideas": [...],
+                "keyword_suggestions": [...],
+                "content_gaps": [...]
+            }
+        """
+        system_prompt = """You are an expert SEO content strategist analyzing a blog's existing content.
+Your task is to identify content gaps and suggest new topics and keywords.
+Output ONLY valid JSON with the specified format, nothing else."""
+
+        # Prepare content summary for analysis
+        posts_summary = []
+        for post in existing_posts[:50]:  # Limit to avoid token limits
+            summary = {
+                "title": post.get("title", ""),
+                "summary": post.get("summary", "")[:200],  # Truncate summaries
+            }
+            # Include content snippet if available
+            content = post.get("content", "")
+            if content:
+                summary["content_preview"] = content[:500]
+            posts_summary.append(summary)
+
+        posts_text = "\n".join(
+            f"- {p['title']}: {p.get('summary', '')[:100]}"
+            for p in posts_summary
+        )
+
+        user_prompt = f"""Analyze these existing blog posts and suggest new content opportunities:
+
+Existing Blog Posts ({len(posts_summary)} total):
+{posts_text}
+
+Based on this content, provide {suggestion_count} suggestions in this exact JSON format:
+{{
+    "topic_ideas": [
+        {{
+            "title": "Suggested article title",
+            "description": "Brief description of what this article would cover",
+            "primary_keyword": "main target keyword",
+            "secondary_keywords": ["keyword2", "keyword3"],
+            "search_intent": "informational|commercial|transactional",
+            "rationale": "Why this topic would be valuable (content gap, trending, etc.)"
+        }}
+    ],
+    "keyword_suggestions": [
+        {{
+            "keyword": "long-tail keyword phrase",
+            "intent": "informational|commercial|transactional",
+            "difficulty_estimate": "low|medium|high",
+            "rationale": "Why this keyword is a good opportunity"
+        }}
+    ],
+    "content_gaps": [
+        {{
+            "gap": "Description of missing content area",
+            "opportunity": "How this could be addressed",
+            "priority": "high|medium|low"
+        }}
+    ]
+}}
+
+Focus on:
+1. Topics NOT already covered by existing posts
+2. Long-tail keywords with commercial/informational intent
+3. Content gaps that competitors might be filling
+4. Trending topics in the career/job search space"""
+
+        response = await self.generate_with_system_prompt(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.8,
+            max_tokens=4096,
+            operation_name="suggest_topics_and_keywords",
+        )
+
+        import json
+        try:
+            clean_response = response.strip()
+            if clean_response.startswith("```"):
+                clean_response = clean_response.split("\n", 1)[1]
+                clean_response = clean_response.rsplit("```", 1)[0]
+            return json.loads(clean_response)
+        except json.JSONDecodeError:
+            # Return empty structure on parse failure
+            return {
+                "topic_ideas": [],
+                "keyword_suggestions": [],
+                "content_gaps": [],
+                "raw_response": response,
+            }
 
 
 def create_openai_client(

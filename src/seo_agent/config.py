@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     target_sitemap_url: str = Field(
         default="https://jobnova.ai/sitemap.xml", description="Sitemap URL for blog discovery"
     )
+    blog_api_url: str = Field(
+        default="https://api.libaspace.com/api/blogs", description="Blog API URL for fetching posts"
+    )
+    blog_cache_max_age_hours: int = Field(
+        default=24, description="Maximum age of blog cache in hours"
+    )
 
     # Keyword research defaults
     default_min_volume: int = Field(
@@ -49,9 +55,9 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=Path("./data"), description="Data directory path")
 
     @property
-    def categories_file(self) -> Path:
-        """Path to categories JSON file."""
-        return self.data_dir / "categories.json"
+    def blog_cache_file(self) -> Path:
+        """Path to blog cache JSON file."""
+        return self.data_dir / "blog_cache.json"
 
     @property
     def existing_content_dir(self) -> Path:
@@ -68,12 +74,18 @@ class Settings(BaseSettings):
         """Path to generated images directory."""
         return self.data_dir / "generated" / "images"
 
+    @property
+    def logs_dir(self) -> Path:
+        """Path to workflow logs directory."""
+        return self.data_dir / "logs"
+
     def ensure_directories(self) -> None:
         """Create all required directories if they don't exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.existing_content_dir.mkdir(parents=True, exist_ok=True)
         self.generated_articles_dir.mkdir(parents=True, exist_ok=True)
         self.generated_images_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def has_openai_key(self) -> bool:

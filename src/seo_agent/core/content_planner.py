@@ -13,7 +13,6 @@ class ContentPlanner:
     async def generate_topics_from_keywords(
         self,
         qualified_keywords: list[Keyword],
-        category: str,
         count: int = 5,
     ) -> list[dict]:
         """Generate topic suggestions from qualified keywords."""
@@ -28,9 +27,7 @@ Generate blog post topics based on the provided keywords.
 Each topic should target 1 primary keyword and 2-3 secondary keywords.
 Output ONLY valid JSON array, nothing else."""
 
-        user_prompt = f"""Category: {category}
-
-Available keywords (with search volume and KD):
+        user_prompt = f"""Available keywords (with search volume and KD):
 {self._format_keywords(qualified_keywords[:15])}
 
 Generate {count} unique blog post topics. Each topic should:

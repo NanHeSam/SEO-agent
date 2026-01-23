@@ -22,20 +22,18 @@ class KeywordResearchService:
 
     async def original_workflow(
         self,
-        category: str,
         existing_titles: list[str],
         keyword_count: int = 20,
     ) -> list[Keyword]:
         """
         Original workflow: GPT suggests keywords, DataForSEO validates.
 
-        1. GPT-5.2 suggests keywords based on category + existing content
+        1. GPT-5.2 suggests keywords based on existing content
         2. DataForSEO gets metrics for each keyword
         3. Filter by KD < 30 AND volume > 5000
         """
         # Step 1: Get keyword suggestions from GPT
         suggested_keywords = await self.openai.suggest_keywords(
-            category=category,
             existing_titles=existing_titles,
             count=keyword_count,
         )
@@ -68,7 +66,6 @@ class KeywordResearchService:
 
     async def alternative_workflow(
         self,
-        category: str,
         existing_titles: list[str],
         keyword_count: int = 10,
     ) -> tuple[dict, list[Keyword]]:
@@ -80,7 +77,6 @@ class KeywordResearchService:
         """
         # Step 1: Get topic suggestion from GPT
         topic_data = await self.openai.suggest_topic(
-            category=category,
             existing_titles=existing_titles,
         )
 
@@ -187,7 +183,6 @@ class KeywordResearchService:
     async def generate_topics_from_keywords(
         self,
         keywords: list[Keyword],
-        category: str,
         count: int = 5,
     ) -> list[dict]:
         """Generate topic suggestions from qualified keywords."""
@@ -197,7 +192,6 @@ class KeywordResearchService:
         for i in range(0, len(keyword_strings), 3):
             batch = keyword_strings[i:i+3]
             topic = await self.openai.suggest_topic(
-                category=category,
                 existing_titles=[],  # Not checking duplicates here
                 keywords=batch,
             )

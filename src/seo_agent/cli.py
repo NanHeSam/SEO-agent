@@ -112,7 +112,6 @@ def research(
 
             if workflow == WorkflowMode.original:
                 keywords = await wf.keyword_service.original_workflow(
-                    category="",  # No category needed
                     existing_titles=existing_titles,
                 )
 
@@ -145,7 +144,6 @@ def research(
 
             else:  # alternative workflow
                 topic, keywords = await wf.keyword_service.alternative_workflow(
-                    category="",  # No category needed
                     existing_titles=existing_titles,
                 )
 

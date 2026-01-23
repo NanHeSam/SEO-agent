@@ -65,7 +65,7 @@ class WorkflowLogger:
         """Log loaded existing posts."""
         self._write_section(
             f"EXISTING POSTS LOADED: {count} posts",
-            {"count": count, "titles": titles[:30], "truncated": len(titles) > 30}
+            {"count": count, "titles": titles}
         )
 
     def log_llm_call(

@@ -125,7 +125,6 @@ class WorkflowOrchestrator:
             # Step 2-3: Get and validate keywords
             task = progress.add_task("Researching keywords...", total=None)
             keywords = await self.keyword_service.original_workflow(
-                category="",  # No category needed
                 existing_titles=existing_titles,
             )
             progress.update(task, completed=True)
@@ -185,7 +184,6 @@ class WorkflowOrchestrator:
             task = progress.add_task("Generating topics...", total=None)
             topics = await self.content_planner.generate_topics_from_keywords(
                 qualified_keywords=qualified,
-                category="",  # No category needed
                 count=5,
             )
             progress.update(task, completed=True)
@@ -277,7 +275,6 @@ class WorkflowOrchestrator:
             # Step 2-3: Get topic and keywords
             task = progress.add_task("Generating topic and keywords...", total=None)
             topic, keywords = await self.keyword_service.alternative_workflow(
-                category="",  # No category needed
                 existing_titles=existing_titles,
             )
             progress.update(task, completed=True)

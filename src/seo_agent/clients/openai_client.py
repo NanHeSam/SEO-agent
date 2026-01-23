@@ -73,23 +73,20 @@ class OpenAIClient:
 
     async def suggest_keywords(
         self,
-        category: str,
         existing_titles: list[str],
         count: int = 20,
     ) -> list[str]:
-        """Suggest SEO keywords based on category and existing content."""
+        """Suggest SEO keywords based on existing content."""
         system_prompt = """You are an SEO expert specializing in keyword research.
 Your task is to suggest high-potential keywords for blog content.
 Output ONLY a JSON array of keyword strings, nothing else."""
 
-        existing_content = "\n".join(f"- {title}" for title in existing_titles[:20])
+        existing_content = "\n".join(f"- {title}" for title in existing_titles)
 
-        user_prompt = f"""Category: {category}
-
-Existing blog posts:
+        user_prompt = f"""Existing blog posts:
 {existing_content}
 
-Suggest {count} unique, high-potential keywords for this category that:
+Suggest {count} unique, high-potential keywords that:
 1. Are NOT already covered by existing posts
 2. Have commercial or informational search intent
 3. Are long-tail keywords (3-5 words) for better ranking potential
@@ -134,7 +131,6 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
 
     async def suggest_topic(
         self,
-        category: str,
         existing_titles: list[str],
         keywords: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -143,14 +139,12 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
 Your task is to suggest a unique, high-value blog topic.
 Output ONLY valid JSON with the specified format, nothing else."""
 
-        existing_content = "\n".join(f"- {title}" for title in existing_titles[:30])
+        existing_content = "\n".join(f"- {title}" for title in existing_titles)
         keywords_context = ""
         if keywords:
             keywords_context = f"\nTarget keywords to incorporate: {', '.join(keywords[:10])}"
 
-        user_prompt = f"""Category: {category}
-
-Existing blog posts (AVOID duplicating these):
+        user_prompt = f"""Existing blog posts (AVOID duplicating these):
 {existing_content}
 {keywords_context}
 

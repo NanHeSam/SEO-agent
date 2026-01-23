@@ -54,10 +54,10 @@ class KeywordResearchService:
             keyword = Keyword(
                 keyword=kw_str,
                 metrics=KeywordMetrics(
-                    search_volume=metrics.get("search_volume", 0),
-                    keyword_difficulty=metrics.get("keyword_difficulty", 0),
-                    cpc=metrics.get("cpc", 0),
-                    competition=metrics.get("competition", 0),
+                    search_volume=metrics.get("search_volume") or 0,
+                    keyword_difficulty=metrics.get("keyword_difficulty") or 0,
+                    cpc=metrics.get("cpc") or 0,
+                    competition=metrics.get("competition") or 0,
                     competition_level=metrics.get("competition_level", ""),
                 ),
                 source="gpt_suggested",
@@ -109,10 +109,10 @@ class KeywordResearchService:
             keyword = Keyword(
                 keyword=suggestion["keyword"],
                 metrics=KeywordMetrics(
-                    search_volume=suggestion.get("search_volume", 0),
-                    keyword_difficulty=difficulty,
-                    cpc=suggestion.get("cpc", 0),
-                    competition=suggestion.get("competition", 0),
+                    search_volume=suggestion.get("search_volume") or 0,
+                    keyword_difficulty=difficulty or 0,
+                    cpc=suggestion.get("cpc") or 0,
+                    competition=suggestion.get("competition") or 0,
                     competition_level=suggestion.get("competition_level", ""),
                 ),
                 source="dataforseo_suggested",
@@ -138,9 +138,9 @@ class KeywordResearchService:
         # Start with volume data
         for kw, vol_data in volume_data.items():
             metrics_map[kw] = {
-                "search_volume": vol_data.get("search_volume", 0),
-                "cpc": vol_data.get("cpc", 0),
-                "competition": vol_data.get("competition", 0),
+                "search_volume": vol_data.get("search_volume") or 0,
+                "cpc": vol_data.get("cpc") or 0,
+                "competition": vol_data.get("competition") or 0,
                 "competition_level": vol_data.get("competition_level", ""),
                 "keyword_difficulty": 0,
             }
@@ -148,10 +148,10 @@ class KeywordResearchService:
         # Add difficulty data
         for kw, diff_data in difficulty.items():
             if kw in metrics_map:
-                metrics_map[kw]["keyword_difficulty"] = diff_data.get("keyword_difficulty", 0)
+                metrics_map[kw]["keyword_difficulty"] = diff_data.get("keyword_difficulty") or 0
             else:
                 metrics_map[kw] = {
-                    "keyword_difficulty": diff_data.get("keyword_difficulty", 0),
+                    "keyword_difficulty": diff_data.get("keyword_difficulty") or 0,
                     "search_volume": 0,
                     "cpc": 0,
                     "competition": 0,

@@ -2,13 +2,137 @@
 
 from typing import Any
 
+import httpx
+
 from seo_agent.clients.base import BaseAsyncClient
+from seo_agent.core.workflow_logger import get_logger
+
+
+class DataForSEOError(RuntimeError):
+    """Raised when DataForSEO API returns an error response."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str,
+        status_code: int | None = None,
+        status_message: str | None = None,
+        task_errors: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.status_code = status_code
+        self.status_message = status_message
+        self.task_errors = task_errors or []
 
 
 class DataForSEOClient(BaseAsyncClient):
     """Client for DataForSEO API endpoints."""
 
     BASE_URL = "https://api.dataforseo.com"
+
+    @staticmethod
+    def _normalize_number(value: Any, default: int | float = 0) -> int | float:
+        if value is None:
+            return default
+        return value
+
+    def _extract_task_errors(self, response: dict[str, Any]) -> list[dict[str, Any]]:
+        task_errors = []
+        for task in response.get("tasks", []):
+            if task.get("status_code") != 20000:
+                task_errors.append({
+                    "status_code": task.get("status_code"),
+                    "status_message": task.get("status_message"),
+                    "error_message": task.get("error_message"),
+                    "id": task.get("id"),
+                })
+        return task_errors
+
+    def _ensure_success(self, operation: str, response: dict[str, Any]) -> None:
+        status_code = response.get("status_code")
+        status_message = response.get("status_message")
+        tasks_error = response.get("tasks_error", 0)
+        task_errors = self._extract_task_errors(response)
+
+        if status_code != 20000 or tasks_error or task_errors:
+            message = (
+                f"DataForSEO API error during {operation}: "
+                f"status_code={status_code} status_message={status_message}"
+            )
+            if task_errors:
+                first = task_errors[0]
+                message = (
+                    f"{message} task_status_code={first.get('status_code')} "
+                    f"task_status_message={first.get('status_message')}"
+                )
+
+            logger = get_logger()
+            if logger:
+                logger.log_dataforseo_error(operation, {
+                    "status_code": status_code,
+                    "status_message": status_message,
+                    "tasks_error": tasks_error,
+                    "tasks_count": response.get("tasks_count"),
+                    "task_errors": task_errors,
+                })
+
+            raise DataForSEOError(
+                message,
+                operation=operation,
+                status_code=status_code,
+                status_message=status_message,
+                task_errors=task_errors,
+            )
+
+    def _handle_http_error(self, operation: str, exc: httpx.HTTPStatusError) -> None:
+        response = exc.response
+        http_status = response.status_code
+        http_reason = response.reason_phrase
+        details: dict[str, Any] = {
+            "http_status": http_status,
+            "http_reason": http_reason,
+        }
+
+        response_data: dict[str, Any] | None = None
+        try:
+            response_data = response.json()
+            details["response"] = response_data
+        except ValueError:
+            text = response.text
+            details["response_text"] = text[:1000] if text else ""
+
+        data_status_code: int | None = None
+        data_status_message: str | None = None
+        if response_data:
+            data_status_code = response_data.get("status_code")
+            data_status_message = response_data.get("status_message")
+
+        status_code = data_status_code if data_status_code is not None else http_status
+        status_message = data_status_message if data_status_message and data_status_message != "Ok." else http_reason
+
+        logger = get_logger()
+        if logger:
+            logger.log_dataforseo_error(operation, details)
+
+        raise DataForSEOError(
+            f"DataForSEO HTTP error during {operation}: {http_status} {http_reason}",
+            operation=operation,
+            status_code=status_code,
+            status_message=status_message,
+        )
+
+    async def _post_json(self, endpoint: str, *, operation: str, **kwargs: Any) -> dict[str, Any]:
+        try:
+            response = await self.post(endpoint, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            self._handle_http_error(operation, exc)
+            raise
+
+        data = response.json()
+        self._ensure_success(operation, data)
+        return data
 
     def __init__(
         self,
@@ -54,12 +178,34 @@ class DataForSEOClient(BaseAsyncClient):
             }
         ]
 
-        response = await self.post_json(
+        response = await self._post_json(
             "/v3/dataforseo_labs/google/keyword_suggestions/live",
             json=payload,
+            operation="get_keyword_suggestions",
         )
 
-        return self._extract_keywords(response)
+        result = self._extract_keywords(response)
+
+        # Log the API response
+        logger = get_logger()
+        if logger:
+            # Convert list to dict for logging
+            response_data = {
+                kw["keyword"]: {
+                    "search_volume": self._normalize_number(kw.get("search_volume"), 0),
+                    "cpc": self._normalize_number(kw.get("cpc"), 0),
+                    "competition": self._normalize_number(kw.get("competition"), 0),
+                    "competition_level": kw.get("competition_level", ""),
+                }
+                for kw in result
+            }
+            logger.log_dataforseo_response(
+                operation="get_keyword_suggestions",
+                keywords=[seed_keyword],
+                response_data=response_data,
+            )
+
+        return result
 
     async def get_keyword_ideas(
         self,
@@ -82,9 +228,10 @@ class DataForSEOClient(BaseAsyncClient):
             }
         ]
 
-        response = await self.post_json(
+        response = await self._post_json(
             "/v3/dataforseo_labs/google/keyword_ideas/live",
             json=payload,
+            operation="get_keyword_ideas",
         )
 
         return self._extract_keywords(response)
@@ -108,12 +255,24 @@ class DataForSEOClient(BaseAsyncClient):
             }
         ]
 
-        response = await self.post_json(
+        response = await self._post_json(
             "/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
             json=payload,
+            operation="get_bulk_keyword_difficulty",
         )
 
-        return self._extract_difficulty_data(response)
+        result = self._extract_difficulty_data(response)
+
+        # Log the API response
+        logger = get_logger()
+        if logger:
+            logger.log_dataforseo_response(
+                operation="get_bulk_keyword_difficulty",
+                keywords=keywords,
+                response_data=result,
+            )
+
+        return result
 
     async def get_search_volume(
         self,
@@ -134,12 +293,24 @@ class DataForSEOClient(BaseAsyncClient):
             }
         ]
 
-        response = await self.post_json(
+        response = await self._post_json(
             "/v3/keywords_data/google_ads/search_volume/live",
             json=payload,
+            operation="get_search_volume",
         )
 
-        return self._extract_search_volume_data(response)
+        result = self._extract_search_volume_data(response)
+
+        # Log the API response
+        logger = get_logger()
+        if logger:
+            logger.log_dataforseo_response(
+                operation="get_search_volume",
+                keywords=keywords,
+                response_data=result,
+            )
+
+        return result
 
     def _extract_search_volume_data(
         self, response: dict[str, Any]
@@ -156,9 +327,9 @@ class DataForSEOClient(BaseAsyncClient):
             for item in results:
                 keyword = item.get("keyword", "").lower()
                 volume_map[keyword] = {
-                    "search_volume": item.get("search_volume", 0),
-                    "cpc": item.get("cpc", 0),
-                    "competition": item.get("competition", 0),
+                    "search_volume": self._normalize_number(item.get("search_volume"), 0),
+                    "cpc": self._normalize_number(item.get("cpc"), 0),
+                    "competition": self._normalize_number(item.get("competition"), 0),
                     "competition_level": item.get("competition_level", ""),
                 }
 
@@ -198,10 +369,10 @@ class DataForSEOClient(BaseAsyncClient):
                 difficulty_info = difficulty_data.get(kw, {})
                 keyword_metrics.append({
                     "keyword": idea.get("keyword"),
-                    "search_volume": idea.get("search_volume", 0),
-                    "keyword_difficulty": difficulty_info.get("keyword_difficulty", 0),
-                    "cpc": idea.get("cpc", 0),
-                    "competition": idea.get("competition", 0),
+                    "search_volume": self._normalize_number(idea.get("search_volume"), 0),
+                    "keyword_difficulty": self._normalize_number(difficulty_info.get("keyword_difficulty"), 0),
+                    "cpc": self._normalize_number(idea.get("cpc"), 0),
+                    "competition": self._normalize_number(idea.get("competition"), 0),
                     "competition_level": idea.get("competition_level", ""),
                 })
 
@@ -224,13 +395,13 @@ class DataForSEOClient(BaseAsyncClient):
                     keywords.append({
                         "keyword": keyword_info.get("keyword", item.get("keyword", "")),
                         "search_volume": keyword_info.get("keyword_info", {}).get(
-                            "search_volume", item.get("search_volume", 0)
+                            "search_volume", self._normalize_number(item.get("search_volume"), 0)
                         ),
                         "cpc": keyword_info.get("keyword_info", {}).get(
-                            "cpc", item.get("cpc", 0)
+                            "cpc", self._normalize_number(item.get("cpc"), 0)
                         ),
                         "competition": keyword_info.get("keyword_info", {}).get(
-                            "competition", item.get("competition", 0)
+                            "competition", self._normalize_number(item.get("competition"), 0)
                         ),
                         "competition_level": keyword_info.get("keyword_info", {}).get(
                             "competition_level", item.get("competition_level", "")
@@ -256,7 +427,7 @@ class DataForSEOClient(BaseAsyncClient):
                 for item in items:
                     keyword = item.get("keyword", "").lower()
                     difficulty_map[keyword] = {
-                        "keyword_difficulty": item.get("keyword_difficulty", 0),
+                        "keyword_difficulty": self._normalize_number(item.get("keyword_difficulty"), 0),
                     }
 
         return difficulty_map

@@ -52,6 +52,7 @@ htmlcov/
 data/existing_content/*
 data/generated/articles/*
 data/generated/images/*
+data/blog_cache.json
 !data/existing_content/.gitkeep
 !data/generated/articles/.gitkeep
 !data/generated/images/.gitkeep

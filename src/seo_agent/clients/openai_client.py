@@ -2,9 +2,10 @@
 
 import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from seo_agent.core.workflow_logger import get_logger
 
@@ -24,7 +25,7 @@ class OpenAIClient:
 
     async def chat_completion(
         self,
-        messages: list[dict[str, str]],
+        messages: list[ChatCompletionMessageParam],
         temperature: float = 0.7,
         max_tokens: int = 4096,
         **kwargs: Any,
@@ -48,7 +49,7 @@ class OpenAIClient:
         operation_name: str = "llm_call",
     ) -> str:
         """Generate completion with a system and user prompt."""
-        messages = [
+        messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
@@ -71,20 +72,55 @@ class OpenAIClient:
 
         return response
 
+    def _build_posts_context(
+        self,
+        existing_posts: list[dict[str, str]],
+        fields: list[str],
+        max_posts: int = 50,
+        summary_chars: int = 200,
+        content_chars: int = 500,
+    ) -> list[str]:
+        allowed_fields = {"title", "summary", "content"}
+        normalized_fields = [field for field in fields if field in allowed_fields]
+        if not normalized_fields:
+            normalized_fields = ["title"]
+
+        lines: list[str] = []
+        for post in existing_posts[:max_posts]:
+            parts: list[str] = []
+            if "title" in normalized_fields:
+                parts.append(f"Title: {post.get('title', '')}")
+            if "summary" in normalized_fields:
+                summary = post.get("summary", "")
+                if summary:
+                    parts.append(f"Summary: {summary[:summary_chars]}")
+            if "content" in normalized_fields:
+                content = post.get("content", "")
+                if content:
+                    parts.append(f"Content: {content[:content_chars]}")
+            if parts:
+                lines.append(" | ".join(parts))
+        return lines
+
     async def suggest_keywords(
         self,
-        existing_titles: list[str],
+        existing_posts: list[dict[str, str]],
         count: int = 20,
+        fields: list[str] | None = None,
     ) -> list[str]:
         """Suggest SEO keywords based on existing content."""
         system_prompt = """You are an SEO expert specializing in keyword research.
 Your task is to suggest high-potential keywords for blog content.
 Output ONLY a JSON array of keyword strings, nothing else."""
 
-        existing_content = "\n".join(f"- {title}" for title in existing_titles)
+        context_lines = self._build_posts_context(
+            existing_posts,
+            fields or ["title"],
+        )
+        existing_content = "\n".join(f"- {line}" for line in context_lines)
 
         user_prompt = f"""Existing blog posts:
-{existing_content}
+ {existing_content}
 
 Suggest {count} unique, high-potential keywords that:
 1. Are NOT already covered by existing posts
@@ -131,22 +167,27 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
 
     async def suggest_topic(
         self,
-        existing_titles: list[str],
+        existing_posts: list[dict[str, str]],
         keywords: list[str] | None = None,
+        fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """Suggest a unique blog topic that doesn't duplicate existing content."""
         system_prompt = """You are an SEO content strategist.
 Your task is to suggest a unique, high-value blog topic.
 Output ONLY valid JSON with the specified format, nothing else."""
 
-        existing_content = "\n".join(f"- {title}" for title in existing_titles)
+        context_lines = self._build_posts_context(
+            existing_posts,
+            fields or ["title"],
+        )
+        existing_content = "\n".join(f"- {line}" for line in context_lines)
         keywords_context = ""
         if keywords:
             keywords_context = f"\nTarget keywords to incorporate: {', '.join(keywords[:10])}"
 
         user_prompt = f"""Existing blog posts (AVOID duplicating these):
-{existing_content}
-{keywords_context}
+ {existing_content}
+ {keywords_context}
 
 Suggest ONE unique blog topic that:
 1. Is NOT covered by any existing post
@@ -312,7 +353,16 @@ Then the full article in Markdown format."""
     async def generate_image(
         self,
         prompt: str,
-        size: str = "1024x1024",
+        size: Literal[
+            "auto",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536",
+            "256x256",
+            "512x512",
+            "1792x1024",
+            "1024x1792",
+        ] = "1024x1024",
         output_path: Path | None = None,
     ) -> dict[str, Any]:
         """Generate an image using the configured image model."""
@@ -326,6 +376,8 @@ Then the full article in Markdown format."""
             n=1,
         )
 
+        if not response.data:
+            raise ValueError("Image generation returned no data")
         image_data = response.data[0]
 
         # Get image URL or base64 data depending on response
@@ -395,9 +447,10 @@ Return ONLY the image prompt (1-2 sentences)."""
 
     async def suggest_topics_and_keywords(
         self,
-        existing_posts: list[dict],  # [{title, summary, content?}]
+        existing_posts: list[dict[str, str]],
         suggestion_count: int = 10,
-    ) -> dict:
+        fields: list[str] | None = None,
+    ) -> Any:
         """
         Analyze existing blog content and suggest new topics and keywords.
 
@@ -412,27 +465,16 @@ Return ONLY the image prompt (1-2 sentences)."""
 Your task is to identify content gaps and suggest new topics and keywords.
 Output ONLY valid JSON with the specified format, nothing else."""
 
-        # Prepare content summary for analysis
-        posts_summary = []
-        for post in existing_posts[:50]:  # Limit to avoid token limits
-            summary = {
-                "title": post.get("title", ""),
-                "summary": post.get("summary", "")[:200],  # Truncate summaries
-            }
-            # Include content snippet if available
-            content = post.get("content", "")
-            if content:
-                summary["content_preview"] = content[:500]
-            posts_summary.append(summary)
-
-        posts_text = "\n".join(
-            f"- {p['title']}: {p.get('summary', '')[:100]}"
-            for p in posts_summary
+        context_lines = self._build_posts_context(
+            existing_posts,
+            fields or ["title", "summary"],
         )
+        posts_text = "\n".join(f"- {line}" for line in context_lines)
+        posts_count = len(context_lines)
 
         user_prompt = f"""Analyze these existing blog posts and suggest new content opportunities:
 
-Existing Blog Posts ({len(posts_summary)} total):
+Existing Blog Posts ({posts_count} total):
 {posts_text}
 
 Based on this content, provide {suggestion_count} suggestions in this exact JSON format:

@@ -1,5 +1,7 @@
 """Keyword research service combining DataForSEO and OpenAI."""
 
+from typing import Any
+
 from seo_agent.clients.dataforseo_client import DataForSEOClient
 from seo_agent.clients.openai_client import OpenAIClient
 from seo_agent.models.keyword import Keyword, KeywordGroup, KeywordMetrics
@@ -22,8 +24,9 @@ class KeywordResearchService:
 
     async def original_workflow(
         self,
-        existing_titles: list[str],
+        existing_posts: list[dict[str, str]],
         keyword_count: int = 20,
+        llm_fields: list[str] | None = None,
     ) -> list[Keyword]:
         """
         Original workflow: GPT suggests keywords, DataForSEO validates.
@@ -34,8 +37,9 @@ class KeywordResearchService:
         """
         # Step 1: Get keyword suggestions from GPT
         suggested_keywords = await self.openai.suggest_keywords(
-            existing_titles=existing_titles,
+            existing_posts=existing_posts,
             count=keyword_count,
+            fields=llm_fields,
         )
 
         if not suggested_keywords:
@@ -66,9 +70,10 @@ class KeywordResearchService:
 
     async def alternative_workflow(
         self,
-        existing_titles: list[str],
+        existing_posts: list[dict[str, str]],
         keyword_count: int = 10,
-    ) -> tuple[dict, list[Keyword]]:
+        llm_fields: list[str] | None = None,
+    ) -> tuple[Any, list[Keyword]]:
         """
         Alternative workflow: GPT suggests topic, DataForSEO generates keywords.
 
@@ -77,7 +82,8 @@ class KeywordResearchService:
         """
         # Step 1: Get topic suggestion from GPT
         topic_data = await self.openai.suggest_topic(
-            existing_titles=existing_titles,
+            existing_posts=existing_posts,
+            fields=llm_fields,
         )
 
         # Step 2: Use topic to get related keywords from DataForSEO
@@ -120,7 +126,7 @@ class KeywordResearchService:
     async def _get_metrics_for_keywords(
         self,
         keywords: list[str],
-    ) -> dict[str, dict]:
+    ) -> Any:
         """Get metrics for a list of keywords."""
         # Get exact search volume for keywords
         volume_data = await self.dataforseo.get_search_volume(keywords)
@@ -184,7 +190,7 @@ class KeywordResearchService:
         self,
         keywords: list[Keyword],
         count: int = 5,
-    ) -> list[dict]:
+    ) -> list[Any]:
         """Generate topic suggestions from qualified keywords."""
         keyword_strings = [kw.keyword for kw in keywords[:10]]
 
@@ -192,7 +198,7 @@ class KeywordResearchService:
         for i in range(0, len(keyword_strings), 3):
             batch = keyword_strings[i:i+3]
             topic = await self.openai.suggest_topic(
-                existing_titles=[],  # Not checking duplicates here
+                existing_posts=[],  # Not checking duplicates here
                 keywords=batch,
             )
             topics.append(topic)

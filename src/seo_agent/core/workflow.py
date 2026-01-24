@@ -1,7 +1,7 @@
 """Main workflow orchestration for SEO article generation."""
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -12,7 +12,7 @@ from seo_agent.config import Settings
 from seo_agent.core.content_planner import ContentPlanner
 from seo_agent.core.workflow_logger import WorkflowLogger, create_workflow_logger, set_logger
 from seo_agent.models.article import Article
-from seo_agent.models.blog_post import BlogCache
+from seo_agent.models.blog_post import ApiBlogPost, BlogCache
 from seo_agent.models.image import GeneratedImage
 from seo_agent.models.keyword import Keyword, KeywordGroup
 from seo_agent.output.json_writer import JSONWriter
@@ -83,7 +83,8 @@ class WorkflowOrchestrator:
         interactive: bool = True,
         min_volume: int | None = None,
         max_kd: float | None = None,
-        topic_selector: Callable[[list[dict]], dict] | None = None,
+        topic_selector: Callable[..., Any] | None = None,
+        llm_fields: list[str] | None = None,
     ) -> Article | None:
         """
         Run the original workflow:
@@ -97,6 +98,7 @@ class WorkflowOrchestrator:
         """
         min_vol = min_volume or self.settings.default_min_volume
         max_difficulty = max_kd or self.settings.default_max_kd
+        existing_titles: list[str] = []
 
         # Log workflow start
         if self.logger:
@@ -106,6 +108,9 @@ class WorkflowOrchestrator:
                 "interactive": interactive,
             })
 
+        if llm_fields is None:
+            llm_fields = self._prompt_llm_context_fields() if interactive else ["title"]
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -113,19 +118,24 @@ class WorkflowOrchestrator:
         ) as progress:
             # Step 1: Load existing content from API
             task = progress.add_task("Loading existing content...", total=None)
-            cache = await self._load_existing_posts()
-            existing_titles = [p.title for p in cache.posts] if cache else []
+            include_content = "content" in llm_fields
+            cache = await self._load_existing_posts(include_content=include_content)
+            existing_posts = self._build_existing_posts_payload(cache.posts) if cache else []
+            existing_titles = [post["title"] for post in existing_posts]
             progress.update(task, completed=True)
-            console.print(f"[green]Found {len(existing_titles)} existing posts[/green]")
+            console.print(f"[green]Found {len(existing_posts)} existing posts[/green]")
 
             # Log existing posts
             if self.logger:
-                self.logger.log_existing_posts_loaded(len(existing_titles), existing_titles)
+                self.logger.log_existing_posts_loaded(
+                    len(existing_posts), [p["title"] for p in existing_posts]
+                )
 
             # Step 2-3: Get and validate keywords
             task = progress.add_task("Researching keywords...", total=None)
             keywords = await self.keyword_service.original_workflow(
-                existing_titles=existing_titles,
+                existing_posts=existing_posts,
+                llm_fields=llm_fields,
             )
             progress.update(task, completed=True)
             console.print(f"[green]Found {len(keywords)} keywords[/green]")
@@ -243,6 +253,7 @@ class WorkflowOrchestrator:
     async def run_alternative_workflow(
         self,
         interactive: bool = True,
+        llm_fields: list[str] | None = None,
     ) -> Article | None:
         """
         Run the alternative workflow:
@@ -257,6 +268,9 @@ class WorkflowOrchestrator:
                 "interactive": interactive,
             })
 
+        if llm_fields is None:
+            llm_fields = self._prompt_llm_context_fields() if interactive else ["title"]
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -264,18 +278,22 @@ class WorkflowOrchestrator:
         ) as progress:
             # Step 1: Load existing content from API
             task = progress.add_task("Loading existing content...", total=None)
-            cache = await self._load_existing_posts()
-            existing_titles = [p.title for p in cache.posts] if cache else []
+            include_content = "content" in llm_fields
+            cache = await self._load_existing_posts(include_content=include_content)
+            existing_posts = self._build_existing_posts_payload(cache.posts) if cache else []
             progress.update(task, completed=True)
 
             # Log existing posts
             if self.logger:
-                self.logger.log_existing_posts_loaded(len(existing_titles), existing_titles)
+                self.logger.log_existing_posts_loaded(
+                    len(existing_posts), [p["title"] for p in existing_posts]
+                )
 
             # Step 2-3: Get topic and keywords
             task = progress.add_task("Generating topic and keywords...", total=None)
             topic, keywords = await self.keyword_service.alternative_workflow(
-                existing_titles=existing_titles,
+                existing_posts=existing_posts,
+                llm_fields=llm_fields,
             )
             progress.update(task, completed=True)
 
@@ -364,7 +382,7 @@ class WorkflowOrchestrator:
 
     async def _generate_full_article(
         self,
-        topic: dict,
+        topic: Any,
         keyword_group: KeywordGroup,
         search_intent: str,
         category: str,
@@ -447,7 +465,11 @@ class WorkflowOrchestrator:
             # Log cross-links
             if self.logger:
                 links_data = [
-                    {"title": link.title, "url": link.url, "anchor_text": link.anchor_text}
+                    {
+                        "title": link.get("title", ""),
+                        "url": link.get("url", ""),
+                        "anchor_text": link.get("anchor_text", ""),
+                    }
                     for link in article.internal_links
                 ]
                 self.logger.log_cross_links_added(links_data)
@@ -510,7 +532,38 @@ class WorkflowOrchestrator:
 
         return cache
 
-    async def _interactive_topic_selection(self, topics: list[dict]) -> dict | None:
+    def _build_existing_posts_payload(
+        self,
+        posts: list[ApiBlogPost],
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "title": post.title,
+                "summary": post.summary,
+                "content": post.content,
+            }
+            for post in posts
+        ]
+
+    def _prompt_llm_context_fields(self) -> list[str]:
+        console.print("\n[bold]LLM context for keyword/topic generation:[/bold]")
+        console.print("  1. Titles only (fastest)")
+        console.print("  2. Titles + summaries")
+        console.print("  3. Titles + summaries + full content (slowest)")
+        choices = {
+            "1": ["title"],
+            "2": ["title", "summary"],
+            "3": ["title", "summary", "content"],
+        }
+        while True:
+            choice = console.input("Select context [1-3] (default 1): ").strip() or "1"
+            if choice in choices:
+                return choices[choice]
+
+    async def _interactive_topic_selection(
+        self,
+        topics: list[Any],
+    ) -> Any | None:
         """Interactive topic selection."""
         console.print("\n[bold]Available topics:[/bold]")
         for i, topic in enumerate(topics, 1):

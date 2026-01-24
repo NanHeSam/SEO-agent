@@ -2,7 +2,6 @@
 
 import asyncio
 from enum import Enum
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -76,7 +75,7 @@ def scrape(
     asyncio.run(run())
 
 
-def _display_posts(posts: list) -> None:
+def _display_posts(posts) -> None:
     """Display a list of posts."""
     if posts:
         console.print("\n[bold]Posts found:[/bold]")
@@ -105,14 +104,17 @@ def research(
         try:
             # Load existing content from API cache
             cache = await wf._load_existing_posts()
-            existing_titles = [p.title for p in cache.posts] if cache else []
+            existing_posts = [
+                {"title": post.title, "summary": post.summary, "content": post.content}
+                for post in (cache.posts if cache else [])
+            ]
 
             console.print(f"[cyan]Running {workflow.value} workflow...[/cyan]")
-            console.print(f"[dim]Analyzing {len(existing_titles)} existing posts[/dim]")
+            console.print(f"[dim]Analyzing {len(existing_posts)} existing posts[/dim]")
 
             if workflow == WorkflowMode.original:
                 keywords = await wf.keyword_service.original_workflow(
-                    existing_titles=existing_titles,
+                    existing_posts=existing_posts,
                 )
 
                 # Filter
@@ -144,7 +146,7 @@ def research(
 
             else:  # alternative workflow
                 topic, keywords = await wf.keyword_service.alternative_workflow(
-                    existing_titles=existing_titles,
+                    existing_posts=existing_posts,
                 )
 
                 console.print(f"\n[bold]Suggested Topic:[/bold] {topic.get('title')}")
@@ -312,6 +314,7 @@ def suggest(
         suggestions = await openai_client.suggest_topics_and_keywords(
             existing_posts=posts_data,
             suggestion_count=count,
+            fields=["title", "summary", "content"] if include_content else ["title", "summary"],
         )
 
         # Step 5: Display results
@@ -340,7 +343,7 @@ def suggest(
     asyncio.run(run())
 
 
-def _display_suggestions(suggestions: dict) -> None:
+def _display_suggestions(suggestions) -> None:
     """Display AI suggestions in formatted tables."""
     # Topic Ideas
     topic_ideas = suggestions.get("topic_ideas", [])
@@ -393,7 +396,7 @@ def _display_suggestions(suggestions: dict) -> None:
             console.print(f"       [dim]Opportunity: {gap.get('opportunity', '')}[/dim]")
 
 
-def _interactive_topic_selection(topics: list[dict]) -> dict | None:
+def _interactive_topic_selection(topics):
     """Interactive topic selection."""
     console.print("\n[bold]Select a topic to generate:[/bold]")
 

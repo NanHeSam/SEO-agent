@@ -1,5 +1,6 @@
 """Text utilities for SEO content processing."""
 
+import html
 import re
 import unicodedata
 from typing import Iterator
@@ -202,6 +203,108 @@ def clean_markdown(markdown: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
 
     return text.strip()
+
+
+def markdown_to_html(markdown_text: str) -> str:
+    """Convert Markdown content to HTML for richtext fields."""
+    lines = markdown_text.splitlines()
+    html_lines: list[str] = []
+    paragraph_lines: list[str] = []
+    in_ul = False
+    in_ol = False
+    in_code = False
+
+    def flush_paragraph() -> None:
+        if paragraph_lines:
+            text = " ".join(line.strip() for line in paragraph_lines)
+            html_lines.append(f"<p>{_inline_markdown_to_html(text)}</p>")
+            paragraph_lines.clear()
+
+    def close_lists() -> None:
+        nonlocal in_ul, in_ol
+        if in_ul:
+            html_lines.append("</ul>")
+            in_ul = False
+        if in_ol:
+            html_lines.append("</ol>")
+            in_ol = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            flush_paragraph()
+            close_lists()
+            if not in_code:
+                in_code = True
+                html_lines.append("<pre><code>")
+            else:
+                in_code = False
+                html_lines.append("</code></pre>")
+            continue
+
+        if in_code:
+            html_lines.append(html.escape(line))
+            continue
+
+        heading = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading:
+            flush_paragraph()
+            close_lists()
+            level = len(heading.group(1))
+            text = _inline_markdown_to_html(heading.group(2).strip())
+            html_lines.append(f"<h{level}>{text}</h{level}>")
+            continue
+
+        ul_match = re.match(r"^[-*+]\s+(.+)$", line)
+        if ul_match:
+            flush_paragraph()
+            if in_ol:
+                html_lines.append("</ol>")
+                in_ol = False
+            if not in_ul:
+                html_lines.append("<ul>")
+                in_ul = True
+            item = _inline_markdown_to_html(ul_match.group(1).strip())
+            html_lines.append(f"<li>{item}</li>")
+            continue
+
+        ol_match = re.match(r"^\d+\.\s+(.+)$", line)
+        if ol_match:
+            flush_paragraph()
+            if in_ul:
+                html_lines.append("</ul>")
+                in_ul = False
+            if not in_ol:
+                html_lines.append("<ol>")
+                in_ol = True
+            item = _inline_markdown_to_html(ol_match.group(1).strip())
+            html_lines.append(f"<li>{item}</li>")
+            continue
+
+        if not stripped:
+            flush_paragraph()
+            close_lists()
+            continue
+
+        paragraph_lines.append(stripped)
+
+    flush_paragraph()
+    close_lists()
+    if in_code:
+        html_lines.append("</code></pre>")
+
+    return "\n".join(html_lines)
+
+
+def _inline_markdown_to_html(text: str) -> str:
+    text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r'<img src="\2" alt="\1" />', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", text)
+    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
+    text = re.sub(r"_([^_]+)_", r"<em>\1</em>", text)
+    return text
 
 
 def format_meta_description(text: str, keyword: str = "", max_length: int = 160) -> str:

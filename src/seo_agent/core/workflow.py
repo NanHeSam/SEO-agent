@@ -17,7 +17,12 @@ from seo_agent.models.image import GeneratedImage
 from seo_agent.models.keyword import Keyword, KeywordGroup
 from seo_agent.output.json_writer import JSONWriter
 from seo_agent.output.markdown_writer import MarkdownWriter
-from seo_agent.services.blog_api_client import BlogApiClient, create_blog_api_client
+from seo_agent.services.blog_api_client import (
+    BlogApiClient,
+    create_blog_admin_client,
+    create_blog_api_client,
+)
+from seo_agent.services.blog_publisher import BlogPublisher
 from seo_agent.services.content_generator import ContentGeneratorService
 from seo_agent.services.cross_linker import CrossLinkerService
 from seo_agent.services.image_generator import ImageGeneratorService
@@ -378,6 +383,41 @@ class WorkflowOrchestrator:
             search_intent=search_intent,
             category=category,
             blog_cache=cache,
+        )
+
+    async def publish_article(
+        self,
+        article: Article,
+        *,
+        status: int = 1,
+        summary: str | None = None,
+        publish_time: int | None = None,
+        seo_title: str | None = None,
+        seo_description: str | None = None,
+        keywords: list[str] | None = None,
+        cover_url: str | None = None,
+        cover_alt: str | None = None,
+        no_index: int = 0,
+    ) -> dict[str, Any]:
+        if not self.settings.blog_api_token:
+            raise ValueError("BLOG_API_TOKEN is not configured.")
+
+        admin_client = create_blog_admin_client(
+            base_url=self.settings.blog_api_admin_url,
+            token=self.settings.blog_api_token,
+        )
+        publisher = BlogPublisher(admin_client)
+        return await publisher.publish_article(
+            article,
+            status=status,
+            summary=summary,
+            publish_time=publish_time,
+            seo_title=seo_title,
+            seo_description=seo_description,
+            keywords=keywords,
+            cover_url=cover_url,
+            cover_alt=cover_alt,
+            no_index=no_index,
         )
 
     async def _generate_full_article(

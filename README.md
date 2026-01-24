@@ -28,6 +28,10 @@ Required environment variables:
 - `OPENAI_API_KEY` - OpenAI API key
 - `DATAFORSEO_API_CREDENTIALS` - DataForSEO credentials (base64-encoded `login:password`)
 
+Optional environment variables for posting:
+- `BLOG_API_ADMIN_URL` - Blog admin API base URL (default: `https://test-api-admin.libaspace.com/api`)
+- `BLOG_API_TOKEN` - Blog admin API JWT token (required for `post` or `--post`)
+
 To generate the DataForSEO credentials:
 ```bash
 echo -n "your_login:your_password" | base64
@@ -108,16 +112,32 @@ seo-agent generate "Best Remote Jobs in 2025" \
   --keywords "remote jobs,work from home,entry level remote jobs" \
   --intent informational \
   --category remote-work
+
+# Generate and post in one step
+seo-agent generate "Best Remote Jobs in 2025" \
+  --keywords "remote jobs,work from home,entry level remote jobs" \
+  --intent informational \
+  --category remote-work \
+  --post
 ```
 
 ### Full Automated Workflow
 
 ```bash
 # Original workflow (interactive)
-seo-agent workflow remote-work --mode original --interactive
+seo-agent workflow --mode original --interactive
 
 # Alternative workflow
-seo-agent workflow remote-work --mode alternative --interactive
+seo-agent workflow --mode alternative --interactive
+
+# Run workflow and post on completion
+seo-agent workflow --mode original --interactive --post
+```
+
+### Post a Generated Article
+
+```bash
+seo-agent post best-entry-level-remote-jobs-in-2025
 ```
 
 ---

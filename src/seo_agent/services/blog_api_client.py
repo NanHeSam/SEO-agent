@@ -3,6 +3,8 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+from collections.abc import Mapping
 
 import httpx
 
@@ -55,7 +57,7 @@ class BlogApiClient:
         client: httpx.AsyncClient,
         page_number: int,
         page_size: int = 12,
-    ) -> tuple[list[ApiBlogPost], dict]:
+    ) -> tuple[list[ApiBlogPost], Mapping[str, Any]]:
         """Fetch a single page of blog posts from the API."""
         url = f"{self.base_url}?pageNumber={page_number}&pageSize={page_size}"
 
@@ -83,7 +85,7 @@ class BlogApiClient:
         self,
         page_number: int,
         page_size: int = 12,
-    ) -> tuple[list[ApiBlogPost], dict]:
+    ) -> tuple[list[ApiBlogPost], Mapping[str, Any]]:
         """Public method to fetch a single page."""
         async with httpx.AsyncClient() as client:
             return await self._fetch_page(client, page_number, page_size)
@@ -149,6 +151,44 @@ class BlogApiClient:
         return cache
 
 
+class BlogAdminClient:
+    """Client for creating blog posts in the admin API."""
+
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+
+    def _build_create_url(self) -> str:
+        if self.base_url.endswith("/admin/blogs"):
+            return self.base_url
+        if self.base_url.endswith("/api"):
+            return f"{self.base_url}/admin/blogs"
+        return f"{self.base_url}/api/admin/blogs"
+
+    async def create_blog(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        url = self._build_create_url()
+        headers = {
+            "token": self.token,
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers=headers, timeout=30.0)
+        response.raise_for_status()
+
+        response_data = response.json()
+        if response_data.get("code") != 0:
+            message = response_data.get("message", "Unknown error")
+            raise RuntimeError(f"Blog admin API error: {message}")
+
+        return response_data
+
+
 def create_blog_api_client(base_url: str, cache_file: Path) -> BlogApiClient:
     """Factory function to create a BlogApiClient."""
     return BlogApiClient(base_url=base_url, cache_file=cache_file)
+
+
+def create_blog_admin_client(base_url: str, token: str) -> BlogAdminClient:
+    """Factory function to create a BlogAdminClient."""
+    return BlogAdminClient(base_url=base_url, token=token)

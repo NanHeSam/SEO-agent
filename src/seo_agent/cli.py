@@ -1,7 +1,10 @@
 """CLI commands for SEO Agent using Typer."""
 
 import asyncio
+from pathlib import Path
 from enum import Enum
+from typing import Any, Optional
+from collections.abc import Mapping
 
 import typer
 from rich.console import Console
@@ -180,6 +183,12 @@ def generate(
         "informational", "--intent", "-i", help="Search intent (informational/commercial/transactional)"
     ),
     category: str = typer.Option("", "--category", "-c", help="Blog category (optional)"),
+    post: bool = typer.Option(False, "--post", help="Post article to blog admin API"),
+    status: int = typer.Option(1, "--status", help="Publish status (0 draft, 1 publish, 2 unlisted)"),
+    publish_time: Optional[int] = typer.Option(
+        None, "--publish-time", help="Publish time (unix seconds)"
+    ),
+    no_index: int = typer.Option(0, "--no-index", help="Prevent indexing (1 disables indexing)"),
 ):
     """Generate a single SEO article."""
     settings = get_settings()
@@ -197,6 +206,10 @@ def generate(
     if category:
         console.print(f"[dim]Category: {category}[/dim]")
 
+    if post and not settings.blog_api_token:
+        console.print("[red]BLOG_API_TOKEN is required to post articles[/red]")
+        raise typer.Exit(1)
+
     async def run():
         article = await wf.generate_single_article(
             topic=topic,
@@ -212,6 +225,16 @@ def generate(
             console.print(f"  Images: {len(article.images)}")
             console.print(f"  Links: {len(article.internal_links)}")
 
+            if post:
+                console.print("[cyan]Posting article to blog admin API...[/cyan]")
+                result = await wf.publish_article(
+                    article,
+                    status=status,
+                    publish_time=publish_time,
+                    no_index=no_index,
+                )
+                _display_post_result(result)
+
     asyncio.run(run())
 
 
@@ -226,12 +249,22 @@ def workflow(
     interactive: bool = typer.Option(True, "--interactive/--no-interactive", help="Interactive mode"),
     min_volume: int = typer.Option(5000, "--min-volume", help="Minimum search volume"),
     max_kd: int = typer.Option(30, "--max-kd", help="Maximum keyword difficulty"),
+    post: bool = typer.Option(False, "--post", help="Post article to blog admin API"),
+    status: int = typer.Option(1, "--status", help="Publish status (0 draft, 1 publish, 2 unlisted)"),
+    publish_time: Optional[int] = typer.Option(
+        None, "--publish-time", help="Publish time (unix seconds)"
+    ),
+    no_index: int = typer.Option(0, "--no-index", help="Prevent indexing (1 disables indexing)"),
 ):
     """Run full automated workflow."""
     settings = get_settings()
     wf = create_workflow(settings)
 
     console.print(f"\n[bold]Running {mode.value} workflow[/bold]\n")
+
+    if post and not settings.blog_api_token:
+        console.print("[red]BLOG_API_TOKEN is required to post articles[/red]")
+        raise typer.Exit(1)
 
     async def run():
         try:
@@ -249,6 +282,16 @@ def workflow(
             if not article:
                 console.print("[yellow]No article generated[/yellow]")
                 raise typer.Exit(1)
+
+            if post:
+                console.print("[cyan]Posting article to blog admin API...[/cyan]")
+                result = await wf.publish_article(
+                    article,
+                    status=status,
+                    publish_time=publish_time,
+                    no_index=no_index,
+                )
+                _display_post_result(result)
         except DataForSEOError as exc:
             console.print("[red]DataForSEO error during workflow.[/red]")
             console.print(f"[dim]{exc}[/dim]")
@@ -261,6 +304,66 @@ def workflow(
                     "message": str(exc),
                 })
             raise typer.Exit(1)
+
+    asyncio.run(run())
+
+
+# --- Post Command ---
+
+
+@app.command()
+def post(
+    article: str = typer.Argument(..., help="Article slug or path to JSON file"),
+    status: int = typer.Option(1, "--status", help="Publish status (0 draft, 1 publish, 2 unlisted)"),
+    publish_time: Optional[int] = typer.Option(
+        None, "--publish-time", help="Publish time (unix seconds)"
+    ),
+    summary: str = typer.Option("", "--summary", help="Summary override"),
+    seo_title: str = typer.Option("", "--seo-title", help="SEO title override"),
+    seo_description: str = typer.Option("", "--seo-description", help="SEO description override"),
+    keywords: str = typer.Option("", "--keywords", help="Comma-separated keywords override"),
+    cover_url: str = typer.Option("", "--cover-url", help="Cover image URL"),
+    cover_alt: str = typer.Option("", "--cover-alt", help="Cover image alt text"),
+    no_index: int = typer.Option(0, "--no-index", help="Prevent indexing (1 disables indexing)"),
+):
+    """Post a generated article to the blog admin API."""
+    settings = get_settings()
+
+    if not settings.blog_api_token:
+        console.print("[red]BLOG_API_TOKEN is required to post articles[/red]")
+        raise typer.Exit(1)
+
+    from seo_agent.services.blog_api_client import create_blog_admin_client
+    from seo_agent.services.blog_publisher import BlogPublisher, load_article_from_json
+
+    article_path = _resolve_article_json_path(article, settings.generated_articles_dir)
+    article_obj = load_article_from_json(article_path)
+
+    if not article_obj.metadata.title or not article_obj.content:
+        console.print("[red]Article JSON is missing title or content[/red]")
+        raise typer.Exit(1)
+
+    keywords_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords else None
+
+    async def run():
+        admin_client = create_blog_admin_client(
+            base_url=settings.blog_api_admin_url,
+            token=settings.blog_api_token,
+        )
+        publisher = BlogPublisher(admin_client)
+        result = await publisher.publish_article(
+            article_obj,
+            status=status,
+            summary=summary or None,
+            publish_time=publish_time,
+            seo_title=seo_title or None,
+            seo_description=seo_description or None,
+            keywords=keywords_list,
+            cover_url=cover_url or None,
+            cover_alt=cover_alt or None,
+            no_index=no_index,
+        )
+        _display_post_result(result)
 
     asyncio.run(run())
 
@@ -413,6 +516,30 @@ def _interactive_topic_selection(topics):
             pass
 
         console.print("[red]Invalid choice. Try again.[/red]")
+
+
+def _resolve_article_json_path(article: str, articles_dir: Path) -> Path:
+    path = Path(article)
+    if path.exists():
+        return path
+
+    candidate = articles_dir / f"{article}.json"
+    if candidate.exists():
+        return candidate
+
+    console.print("[red]Could not find article JSON file[/red]")
+    console.print(f"[dim]Tried: {path} and {candidate}[/dim]")
+    raise typer.Exit(1)
+
+
+def _display_post_result(result: Mapping[str, Any]) -> None:
+    data = result.get("data", {})
+    if not isinstance(data, Mapping):
+        data = {}
+    blog_id = data.get("id")
+    console.print("[green]Posted article successfully[/green]")
+    if blog_id:
+        console.print(f"  ID: {blog_id}")
 
 
 # --- Entry Point ---

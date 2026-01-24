@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     blog_api_url: str = Field(
         default="https://api.libaspace.com/api/blogs", description="Blog API URL for fetching posts"
     )
+    blog_api_admin_url: str = Field(
+        default="https://test-api-admin.libaspace.com/api",
+        description="Blog admin API base URL for creating posts",
+    )
+    blog_api_token: str = Field(default="", description="Blog admin API JWT token")
     blog_cache_max_age_hours: int = Field(
         default=24, description="Maximum age of blog cache in hours"
     )

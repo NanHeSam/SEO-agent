@@ -14,7 +14,6 @@ class ArticleMetadata(BaseModel):
     primary_keyword: str = Field(..., description="Primary target keyword")
     secondary_keywords: list[str] = Field(default_factory=list)
     search_intent: str = Field(default="informational", description="Search intent type")
-    category: str = Field(default="", description="Blog category")
     author: str = Field(default="JobNova Team", description="Article author")
     created_at: datetime = Field(default_factory=datetime.now)
     word_count: int = Field(default=0, description="Article word count")
@@ -66,7 +65,6 @@ class Article(BaseModel):
             "description": self.metadata.meta_description,
             "date": self.metadata.created_at.strftime("%Y-%m-%d"),
             "author": self.metadata.author,
-            "category": self.metadata.category,
             "keywords": [self.metadata.primary_keyword] + self.metadata.secondary_keywords,
             "reading_time": f"{self.metadata.reading_time_minutes} min read",
         }
@@ -94,7 +92,6 @@ class Article(BaseModel):
                     "primary_keyword": "remote work tips",
                     "secondary_keywords": ["work from home", "remote job tips"],
                     "search_intent": "informational",
-                    "category": "remote-work",
                     "word_count": 2000,
                     "reading_time_minutes": 8,
                 },

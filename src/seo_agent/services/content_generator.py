@@ -22,7 +22,6 @@ class ContentGeneratorService:
         primary_keyword: str,
         secondary_keywords: list[str],
         search_intent: str,
-        category: str = "",
         word_count: int | None = None,
         existing_posts: list[dict[str, str]] | None = None,
     ) -> Article:
@@ -50,7 +49,6 @@ class ContentGeneratorService:
             primary_keyword=primary_keyword,
             secondary_keywords=secondary_keywords,
             search_intent=search_intent,
-            category=category,
             word_count=actual_word_count,
             reading_time_minutes=reading_time,
         )
@@ -64,7 +62,6 @@ class ContentGeneratorService:
         self,
         keyword_group: KeywordGroup,
         search_intent: str,
-        category: str = "",
         word_count: int | None = None,
         existing_posts: list[dict[str, str]] | None = None,
     ) -> Article:
@@ -74,7 +71,6 @@ class ContentGeneratorService:
             primary_keyword=keyword_group.primary_keyword.keyword,
             secondary_keywords=[kw.keyword for kw in keyword_group.secondary_keywords],
             search_intent=search_intent,
-            category=category,
             word_count=word_count,
             existing_posts=existing_posts,
         )

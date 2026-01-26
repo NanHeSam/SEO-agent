@@ -251,7 +251,6 @@ class WorkflowOrchestrator:
             topic=topic,
             keyword_group=keyword_group,
             search_intent=search_intent,
-            category="",
             blog_cache=cache,
         )
 
@@ -345,7 +344,6 @@ class WorkflowOrchestrator:
             topic=topic,
             keyword_group=keyword_group,
             search_intent=topic.get("search_intent", "informational"),
-            category="",
             blog_cache=cache,
         )
 
@@ -354,7 +352,6 @@ class WorkflowOrchestrator:
         topic: str,
         keywords: list[str],
         search_intent: str,
-        category: str = "",
     ) -> Article | None:
         """Generate a single article with provided parameters."""
         # Load existing content for cross-linking
@@ -381,7 +378,6 @@ class WorkflowOrchestrator:
             topic=topic_data,
             keyword_group=keyword_group,
             search_intent=search_intent,
-            category=category,
             blog_cache=cache,
         )
 
@@ -425,7 +421,6 @@ class WorkflowOrchestrator:
         topic: Any,
         keyword_group: KeywordGroup,
         search_intent: str,
-        category: str,
         blog_cache: BlogCache | None,
     ) -> Article:
         """Generate a complete article with images and cross-links."""
@@ -449,7 +444,6 @@ class WorkflowOrchestrator:
                 primary_keyword=keyword_group.primary_keyword.keyword,
                 secondary_keywords=[kw.keyword for kw in keyword_group.secondary_keywords],
                 search_intent=search_intent,
-                category=category,
                 existing_posts=existing_posts[:10],
             )
             progress.update(task, completed=True)
@@ -510,7 +504,7 @@ class WorkflowOrchestrator:
                 # Convert BlogCache to format expected by cross_linker
                 from seo_agent.models.blog_post import ScrapedContent, ExistingPost
                 scraped = ScrapedContent(
-                    category=category,
+                    category="",
                     posts=[
                         ExistingPost(
                             title=p.title,

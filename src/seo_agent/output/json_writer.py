@@ -51,7 +51,6 @@ class JSONWriter:
                 "slug": article.metadata.slug,
                 "meta_description": article.metadata.meta_description,
                 "author": article.metadata.author,
-                "category": article.metadata.category,
                 "cover_url": getattr(article, "cover_url", None),
                 "cover_alt": getattr(article, "cover_alt", None),
                 "created_at": article.metadata.created_at.isoformat(),

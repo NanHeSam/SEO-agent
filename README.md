@@ -7,6 +7,7 @@ SEO article generation automation CLI tool for jobnova.ai/blog.
 - Automated keyword research using DataForSEO API
 - SEO-optimized article generation using OpenAI GPT-5.2
 - Image generation with DALL-E 3
+- Optional image upload to Libaspace admin file API (cloud URLs embedded in article)
 - Internal cross-linking with fuzzy matching
 - Markdown + JSON output with YAML frontmatter
 
@@ -32,6 +33,12 @@ Optional environment variables for posting:
 - `BLOG_API_ADMIN_URL` - Blog admin API base URL (default: `https://test-api-admin.libaspace.com/api`)
 - `BLOG_API_TOKEN` - Blog admin API JWT token (required for `post` or `--post`)
 
+When `BLOG_API_TOKEN` is set, generated images (including the featured/cover image) are uploaded via:
+
+- `POST https://test-api-admin.libaspace.com/api/admin/file/upload` (multipart form-data)
+- Uses the same `token` header as blog posting
+- The returned `data.url` is embedded directly in the article Markdown/HTML
+
 To generate the DataForSEO credentials:
 ```bash
 echo -n "your_login:your_password" | base64
@@ -45,14 +52,14 @@ echo -n "your_login:your_password" | base64
 
 | Step | Description | Command | Status |
 |------|-------------|---------|--------|
-| **1** | Create category list for your product | `seo-agent categories add` | ✅ |
-| **2** | Scan blog for existing titles/content | `seo-agent scrape` | ✅ |
-| **3** | LLM suggests new keywords for category | `seo-agent research --workflow original` | ✅ |
+| **1** | Scan blog for existing titles/content | `seo-agent scrape` | ✅ |
+| **2** | LLM suggests new keywords | `seo-agent research --workflow original` | ✅ |
 | **4** | Filter: KD < 30, volume > 5k | `--min-volume 5000 --max-kd 30` | ✅ |
 | **5** | LLM generates topics from qualified keywords | `seo-agent workflow --mode original` | ✅ |
 | **6** | Generate SEO blog (topic + keywords + intent) | `seo-agent generate` | ✅ |
 | **7** | Humanize AI content (reduce AI detection) | ❌ Not implemented | |
-| **8** | Generate images (3-4 per 1k words) with SEO metadata | Automatic | ✅ |
+| **8** | Generate images (3-4 per 1k words) + featured image | Automatic | ✅ |
+| **8.1** | Upload images and embed cloud URLs (optional) | Automatic when `BLOG_API_TOKEN` is set | ✅ |
 | **9** | Cross-link to other blogs (3-4 per 1k words) | Automatic | ✅ |
 
 ### Alternative Workflow (Steps 4* and 5*)
@@ -66,58 +73,43 @@ echo -n "your_login:your_password" | base64
 
 ## Usage
 
-### Step 1: Category Management
+### Step 1: Scrape Existing Content
 
 ```bash
-# List all categories
-seo-agent categories list
+# Fetch existing blog posts (cached by default)
+seo-agent scrape
 
-# Add a new category
-seo-agent categories add "remote-work" --desc "Remote work tips and strategies"
+# Force fresh fetch (ignore cache)
+seo-agent scrape --force
 
-# Remove a category
-seo-agent categories remove "remote-work"
+# Cache full content (slower, larger cache)
+seo-agent scrape --include-content
 ```
 
-### Step 2: Scrape Existing Content
-
-```bash
-# Scrape existing blog content for cross-linking
-seo-agent scrape remote-work
-
-# Force fresh scrape (ignore cache)
-seo-agent scrape remote-work --force
-
-# Limit number of posts
-seo-agent scrape remote-work --max 50
-```
-
-### Steps 3-5: Keyword Research
+### Steps 2-3: Keyword Research
 
 **Original Workflow** - GPT suggests keywords, DataForSEO validates:
 ```bash
-seo-agent research remote-work --workflow original --min-volume 5000 --max-kd 30
+seo-agent research --workflow original --min-volume 5000 --max-kd 30
 ```
 
 **Alternative Workflow** - GPT suggests topic, DataForSEO generates keywords:
 ```bash
-seo-agent research remote-work --workflow alternative
+seo-agent research --workflow alternative
 ```
 
-### Step 6: Article Generation
+### Step 4: Article Generation
 
 ```bash
 # Generate a single article with specific keywords
 seo-agent generate "Best Remote Jobs in 2025" \
   --keywords "remote jobs,work from home,entry level remote jobs" \
-  --intent informational \
-  --category remote-work
+  --intent informational
 
 # Generate and post in one step
 seo-agent generate "Best Remote Jobs in 2025" \
   --keywords "remote jobs,work from home,entry level remote jobs" \
   --intent informational \
-  --category remote-work \
   --post
 ```
 
@@ -140,6 +132,14 @@ seo-agent workflow --mode original --interactive --post
 seo-agent post best-entry-level-remote-jobs-in-2025
 ```
 
+You can optionally override the cover image on posting:
+
+```bash
+seo-agent post best-entry-level-remote-jobs-in-2025 \
+  --cover-url "https://static.libaspace.com/image/....jpg" \
+  --cover-alt "Best Remote Jobs in 2025 - remote jobs"
+```
+
 ---
 
 ## Output
@@ -160,16 +160,17 @@ Generated files are saved to:
 - Alt text: `{section heading} - {keyword}`
 - 3-4 images per 1,000 words
 
+### Cloud image upload (optional):
+- When `BLOG_API_TOKEN` is set, each generated image is uploaded and the returned public URL is used in the article content.
+- The featured image is also used as the blog cover via `coverUrl` and `coverAlt` when posting.
+
 ---
 
 ## Example Workflow
 
 ```bash
-# 1. Add category
-seo-agent categories add "remote-work" --desc "Remote work tips"
-
-# 2. Research keywords (original workflow)
-seo-agent research remote-work --workflow original --min-volume 100 --max-kd 50
+# 1. Research keywords (original workflow)
+seo-agent research --workflow original --min-volume 100 --max-kd 50
 
 # Output:
 # Found 20 keywords, 6 qualified
@@ -177,11 +178,10 @@ seo-agent research remote-work --workflow original --min-volume 100 --max-kd 50
 # - entry level remote jobs (60.5K volume, KD 21)
 # ...
 
-# 3. Generate article
+# 2. Generate article
 seo-agent generate "Best Entry Level Remote Jobs in 2025" \
   -k "entry level remote jobs,remote jobs no experience,remote customer service jobs" \
-  -i informational \
-  -c remote-work
+  -i informational
 
 # Output:
 # Generated 2696 words
@@ -218,7 +218,6 @@ seo-agent/
 │   │   └── dataforseo_client.py
 │   ├── core/
 │   │   ├── workflow.py        # Main orchestration
-│   │   ├── category_manager.py
 │   │   └── content_planner.py
 │   ├── services/
 │   │   ├── scraper.py         # Blog scraping
@@ -229,7 +228,6 @@ seo-agent/
 │   ├── models/                # Pydantic models
 │   └── output/                # Markdown + JSON writers
 ├── data/
-│   ├── categories.json
 │   ├── existing_content/
 │   └── generated/
 │       ├── articles/

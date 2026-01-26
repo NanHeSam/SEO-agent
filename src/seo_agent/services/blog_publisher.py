@@ -35,7 +35,6 @@ def load_article_from_json(file_path: Path) -> Article:
         primary_keyword=seo.get("primary_keyword", ""),
         secondary_keywords=seo.get("secondary_keywords", []),
         search_intent=seo.get("search_intent", "informational"),
-        category=metadata.get("category", ""),
         author=metadata.get("author", "JobNova Team"),
         created_at=created_dt,
         word_count=metadata.get("word_count", 0),

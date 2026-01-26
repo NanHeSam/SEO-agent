@@ -182,7 +182,6 @@ def generate(
     intent: str = typer.Option(
         "informational", "--intent", "-i", help="Search intent (informational/commercial/transactional)"
     ),
-    category: str = typer.Option("", "--category", "-c", help="Blog category (optional)"),
     post: bool = typer.Option(False, "--post", help="Post article to blog admin API"),
     status: int = typer.Option(1, "--status", help="Publish status (0 draft, 1 publish, 2 unlisted)"),
     publish_time: Optional[int] = typer.Option(
@@ -203,8 +202,6 @@ def generate(
     console.print(f"\n[bold]Generating article:[/bold] {topic}")
     console.print(f"[dim]Keywords: {', '.join(keyword_list)}[/dim]")
     console.print(f"[dim]Intent: {intent}[/dim]")
-    if category:
-        console.print(f"[dim]Category: {category}[/dim]")
 
     if post and not settings.blog_api_token:
         console.print("[red]BLOG_API_TOKEN is required to post articles[/red]")
@@ -215,7 +212,6 @@ def generate(
             topic=topic,
             keywords=keyword_list,
             search_intent=intent,
-            category=category,
         )
 
         if article:
@@ -435,7 +431,6 @@ def suggest(
                     topic=selected["title"],
                     keywords=[selected.get("primary_keyword", "")] + selected.get("secondary_keywords", []),
                     search_intent=selected.get("search_intent", "informational"),
-                    category="",
                 )
 
                 if article:

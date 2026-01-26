@@ -61,7 +61,6 @@ class MarkdownWriter:
             "date": article.metadata.created_at.strftime("%Y-%m-%d"),
             "lastmod": datetime.now().strftime("%Y-%m-%d"),
             "author": article.metadata.author,
-            "category": article.metadata.category,
             "tags": [article.metadata.primary_keyword] + article.metadata.secondary_keywords[:5],
             "keywords": [article.metadata.primary_keyword] + article.metadata.secondary_keywords,
             "reading_time": f"{article.metadata.reading_time_minutes} min read",

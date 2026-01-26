@@ -52,6 +52,8 @@ class JSONWriter:
                 "meta_description": article.metadata.meta_description,
                 "author": article.metadata.author,
                 "category": article.metadata.category,
+                "cover_url": getattr(article, "cover_url", None),
+                "cover_alt": getattr(article, "cover_alt", None),
                 "created_at": article.metadata.created_at.isoformat(),
                 "word_count": article.metadata.word_count,
                 "reading_time_minutes": article.metadata.reading_time_minutes,
@@ -79,6 +81,7 @@ class JSONWriter:
                     "size": img.size,
                     "index": img.index,
                     "file_path": str(img.file_path) if img.file_path else None,
+                    "public_url": img.public_url,
                 }
                 for img in images
             ]

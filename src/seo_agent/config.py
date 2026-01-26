@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Keyword research defaults
     default_min_volume: int = Field(
-        default=5000, description="Minimum search volume for keywords"
+        default=1000, description="Minimum search volume for keywords"
     )
     default_max_kd: int = Field(
         default=30, description="Maximum keyword difficulty score"

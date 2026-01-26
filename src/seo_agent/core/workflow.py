@@ -415,8 +415,8 @@ class WorkflowOrchestrator:
             seo_title=seo_title,
             seo_description=seo_description,
             keywords=keywords,
-            cover_url=cover_url,
-            cover_alt=cover_alt,
+            cover_url=cover_url or getattr(article, "cover_url", None),
+            cover_alt=cover_alt or getattr(article, "cover_alt", None),
             no_index=no_index,
         )
 
@@ -482,6 +482,28 @@ class WorkflowOrchestrator:
                 ]
                 self.logger.log_images_generated(images_data)
 
+            # Upload images and set public URLs (optional)
+            if self.settings.blog_api_token:
+                task = progress.add_task("Uploading images to cloud...", total=None)
+                admin_client = create_blog_admin_client(
+                    base_url=self.settings.blog_api_admin_url,
+                    token=self.settings.blog_api_token,
+                )
+                uploaded_images: list[GeneratedImage] = []
+                for img in all_images:
+                    if not img.file_path:
+                        uploaded_images.append(img)
+                        continue
+                    try:
+                        public_url = await admin_client.upload_file(img.file_path, type_="image")
+                        uploaded_images.append(img.model_copy(update={"public_url": public_url}))
+                    except Exception as e:
+                        # Keep local path fallback if upload fails
+                        console.print(f"[yellow]Image upload failed ({img.file_path.name}): {e}[/yellow]")
+                        uploaded_images.append(img)
+                all_images = uploaded_images
+                progress.update(task, completed=True)
+
             # Add cross-links (using blog cache posts)
             task = progress.add_task("Adding cross-links...", total=None)
             if blog_cache:
@@ -514,12 +536,29 @@ class WorkflowOrchestrator:
                 ]
                 self.logger.log_cross_links_added(links_data)
 
-            # Update article with images
-            article.images = [str(img.file_path) for img in all_images if img.file_path]
+            # Insert image links into the article content (uses public_url when available)
+            article.content = self.image_generator.insert_images_into_content(article, all_images)
+
+            # Update article with images (prefer public URLs when available)
+            article.images = [
+                (img.public_url or str(img.file_path))
+                for img in all_images
+                if img.public_url or img.file_path
+            ]
+
+            # Set cover info from featured image (index == 0)
+            featured = next((img for img in all_images if img.index == 0), None)
+            if featured:
+                article.cover_url = featured.public_url or None
+                article.cover_alt = featured.metadata.alt_text or None
 
             # Write output files
             task = progress.add_task("Writing output files...", total=None)
-            md_path = await self.markdown_writer.write_article(article, all_images)
+            md_path = await self.markdown_writer.write_article(
+                article,
+                all_images,
+                include_images_in_content=False,
+            )
             json_path = await self.json_writer.write_article(article, all_images, keyword_group)
             progress.update(task, completed=True)
 

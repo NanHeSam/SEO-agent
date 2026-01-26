@@ -71,8 +71,11 @@ class MarkdownWriter:
         # Add featured image if available
         if images:
             featured = next((img for img in images if img.index == 0), None)
-            if featured and featured.file_path:
-                data["featured_image"] = f"../images/{featured.file_path.name}"
+            if featured:
+                if featured.public_url:
+                    data["featured_image"] = featured.public_url
+                elif featured.file_path:
+                    data["featured_image"] = f"../images/{featured.file_path.name}"
                 data["featured_image_alt"] = featured.metadata.alt_text
 
         # Add SEO fields

@@ -38,6 +38,8 @@ class Article(BaseModel):
     metadata: ArticleMetadata
     content: str = Field(..., description="Full article content in Markdown")
     images: list[str] = Field(default_factory=list, description="Paths to generated images")
+    cover_url: str | None = Field(default=None, description="Cover image URL for blog admin API")
+    cover_alt: str | None = Field(default=None, description="Cover image alt text for blog admin API")
     internal_links: list[dict[str, str]] = Field(
         default_factory=list,
         description="Internal links added to the article"

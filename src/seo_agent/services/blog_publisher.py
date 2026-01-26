@@ -49,6 +49,8 @@ def load_article_from_json(file_path: Path) -> Article:
         metadata=article_metadata,
         content=content.get("markdown", ""),
         images=images,
+        cover_url=metadata.get("cover_url") or None,
+        cover_alt=metadata.get("cover_alt") or None,
         internal_links=data.get("internal_links", []),
     )
 

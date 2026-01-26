@@ -1,6 +1,7 @@
 """Blog API client for fetching posts from Libaspace Blog API."""
 
 import json
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -165,6 +166,13 @@ class BlogAdminClient:
             return f"{self.base_url}/admin/blogs"
         return f"{self.base_url}/api/admin/blogs"
 
+    def _build_upload_url(self) -> str:
+        if self.base_url.endswith("/admin/file/upload"):
+            return self.base_url
+        if self.base_url.endswith("/api"):
+            return f"{self.base_url}/admin/file/upload"
+        return f"{self.base_url}/api/admin/file/upload"
+
     async def create_blog(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         url = self._build_create_url()
         headers = {
@@ -178,10 +186,41 @@ class BlogAdminClient:
 
         response_data = response.json()
         if response_data.get("code") != 0:
-            message = response_data.get("message", "Unknown error")
+            message = response_data.get("msg") or response_data.get("message") or "Unknown error"
             raise RuntimeError(f"Blog admin API error: {message}")
 
         return response_data
+
+    async def upload_file(self, file_path: Path, *, type_: str = "image") -> str:
+        url = self._build_upload_url()
+        headers = {"token": self.token}
+
+        mime, _ = mimetypes.guess_type(file_path.name)
+        content_type = mime or "application/octet-stream"
+
+        data = {"type": type_}
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path.name, f, content_type)}
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    headers=headers,
+                    data=data,
+                    files=files,
+                    timeout=60.0,
+                )
+
+        response.raise_for_status()
+        response_data = response.json()
+        if response_data.get("code") != 0:
+            message = response_data.get("msg") or response_data.get("message") or "Unknown error"
+            raise RuntimeError(f"File upload API error: {message}")
+
+        uploaded_url = (response_data.get("data") or {}).get("url")
+        if not uploaded_url:
+            raise RuntimeError(f"File upload API error: missing url in response: {response_data}")
+
+        return str(uploaded_url)
 
 
 def create_blog_api_client(base_url: str, cache_file: Path) -> BlogApiClient:

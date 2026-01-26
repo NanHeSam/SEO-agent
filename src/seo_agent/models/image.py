@@ -22,6 +22,10 @@ class GeneratedImage(BaseModel):
     prompt: str = Field(..., description="Prompt used for generation")
     revised_prompt: str = Field(default="", description="Model's revised prompt")
     file_path: Path | None = Field(default=None, description="Path to saved image file")
+    public_url: str | None = Field(
+        default=None,
+        description="Public URL after uploading image to cloud storage",
+    )
     size: str = Field(default="1024x1024", description="Image dimensions")
     index: int = Field(default=0, description="Image index in article")
 
@@ -29,6 +33,8 @@ class GeneratedImage(BaseModel):
     @property
     def markdown_reference(self) -> str:
         """Generate Markdown image reference with relative path to images folder."""
+        if self.public_url:
+            return f"![{self.metadata.alt_text}]({self.public_url})"
         filename = self.file_path.name if self.file_path else self.metadata.filename
         # Use relative path from articles/ to images/ folder
         return f"![{self.metadata.alt_text}](../images/{filename})"
@@ -37,8 +43,10 @@ class GeneratedImage(BaseModel):
     @property
     def html_reference(self) -> str:
         """Generate HTML image tag with full SEO attributes."""
-        filename = self.file_path.name if self.file_path else self.metadata.filename
-        src = f"../images/{filename}"
+        src = self.public_url
+        if not src:
+            filename = self.file_path.name if self.file_path else self.metadata.filename
+            src = f"../images/{filename}"
         return (
             f'<img src="{src}" '
             f'alt="{self.metadata.alt_text}" '

@@ -12,8 +12,9 @@ from rich.table import Table
 
 from seo_agent.config import get_settings
 from seo_agent.core.workflow import create_workflow
-from seo_agent.clients.dataforseo_client import DataForSEOError
+from seo_agent.clients.dataforseo_client import DataForSEOError, create_dataforseo_client
 from seo_agent.services.blog_api_client import create_blog_api_client
+from seo_agent.services.location_cache import load_location_cache, save_location_cache, to_location_options
 
 
 app = typer.Typer(
@@ -23,6 +24,66 @@ app = typer.Typer(
 )
 
 console = Console()
+
+locations_app = typer.Typer(help="Manage DataForSEO location cache")
+app.add_typer(locations_app, name="locations")
+
+
+@locations_app.command("sync")
+def locations_sync(
+    country: str = typer.Option(
+        "",
+        "--country",
+        help="Optional ISO country code to limit results (e.g., US, CA, SG).",
+    ),
+):
+    """Fetch and cache DataForSEO Google Ads locations."""
+    settings = get_settings()
+    if not settings.has_dataforseo_credentials:
+        console.print("[red]DATAFORSEO_API_CREDENTIALS is required to sync locations.[/red]")
+        raise typer.Exit(1)
+
+    client = create_dataforseo_client(settings.dataforseo_api_credentials)
+
+    async def run():
+        async with client:
+            locations = await client.get_google_ads_locations(
+                country_iso_code=country.strip() or None,
+            )
+        save_location_cache(settings.locations_cache_file, locations)
+        console.print(f"[green]Saved {len(locations)} locations to {settings.locations_cache_file}[/green]")
+
+    asyncio.run(run())
+
+
+@locations_app.command("list")
+def locations_list(
+    location_type: str = typer.Option(
+        "Country",
+        "--type",
+        help="Location type to display (e.g., Country, State, City).",
+    ),
+    limit: int = typer.Option(0, "--limit", help="Limit results (0 = all)."),
+):
+    """List cached DataForSEO locations with numeric indexes."""
+    settings = get_settings()
+    locations = load_location_cache(settings.locations_cache_file)
+    if not locations:
+        console.print("[red]No cached locations found. Run `seo-agent locations sync` first.[/red]")
+        raise typer.Exit(1)
+
+    options = to_location_options(locations, location_type=location_type or None)
+    if limit > 0:
+        options = options[:limit]
+
+    table = Table(title=f"Locations ({location_type})" if location_type else "Locations")
+    table.add_column("#", justify="right")
+    table.add_column("Name")
+    table.add_column("Code", justify="right")
+    table.add_column("ISO", justify="center")
+    for idx, opt in enumerate(options, 1):
+        table.add_row(str(idx), opt.name, str(opt.code), opt.country_iso_code or "")
+    console.print(table)
 
 
 class WorkflowMode(str, Enum):
@@ -98,10 +159,16 @@ def research(
     ),
     min_volume: int = typer.Option(5000, "--min-volume", help="Minimum search volume"),
     max_kd: int = typer.Option(30, "--max-kd", help="Maximum keyword difficulty"),
+    country: str = typer.Option(
+        "",
+        "--country",
+        help="Country for keyword research (e.g., USA, Canada). Unrecognized values fall back to DEFAULT_LOCATION_CODE/DEFAULT_LANGUAGE_CODE.",
+    ),
 ):
     """Research keywords based on existing blog content."""
     settings = get_settings()
     wf = create_workflow(settings)
+    country_ctx = country.strip() or settings.default_country
 
     async def run():
         try:
@@ -118,6 +185,7 @@ def research(
             if workflow == WorkflowMode.original:
                 keywords = await wf.keyword_service.original_workflow(
                     existing_posts=existing_posts,
+                    country=country_ctx,
                 )
 
                 # Filter
@@ -150,6 +218,7 @@ def research(
             else:  # alternative workflow
                 topic, keywords = await wf.keyword_service.alternative_workflow(
                     existing_posts=existing_posts,
+                    country=country_ctx,
                 )
 
                 console.print(f"\n[bold]Suggested Topic:[/bold] {topic.get('title')}")
@@ -245,6 +314,11 @@ def workflow(
     interactive: bool = typer.Option(True, "--interactive/--no-interactive", help="Interactive mode"),
     min_volume: int = typer.Option(5000, "--min-volume", help="Minimum search volume"),
     max_kd: int = typer.Option(30, "--max-kd", help="Maximum keyword difficulty"),
+    country: str = typer.Option(
+        "",
+        "--country",
+        help="Country for keyword research (e.g., USA, Canada). Unrecognized values fall back to DEFAULT_LOCATION_CODE/DEFAULT_LANGUAGE_CODE.",
+    ),
     post: bool = typer.Option(False, "--post", help="Post article to blog admin API"),
     status: int = typer.Option(1, "--status", help="Publish status (0 draft, 1 publish, 2 unlisted)"),
     publish_time: Optional[int] = typer.Option(
@@ -269,10 +343,12 @@ def workflow(
                     interactive=interactive,
                     min_volume=min_volume,
                     max_kd=max_kd,
+                    country=country or None,
                 )
             else:
                 article = await wf.run_alternative_workflow(
                     interactive=interactive,
+                    country=country or None,
                 )
 
             if not article:

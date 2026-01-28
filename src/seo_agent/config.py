@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     default_max_kd: int = Field(
         default=30, description="Maximum keyword difficulty score"
     )
+    default_topic_count: int = Field(
+        default=1,
+        description="Number of topic ideas to generate from qualified keywords",
+    )
+
+    # Country context (used for writing prompts / topic framing)
+    default_country: str = Field(
+        default="United States",
+        description="Default country context (used to localize topics/articles)",
+    )
 
     # Paths
     data_dir: Path = Field(default=Path("./data"), description="Data directory path")
@@ -78,6 +88,11 @@ class Settings(BaseSettings):
     def generated_images_dir(self) -> Path:
         """Path to generated images directory."""
         return self.data_dir / "generated" / "images"
+
+    @property
+    def locations_cache_file(self) -> Path:
+        """Path to cached DataForSEO locations list."""
+        return self.data_dir / "locations_cache.json"
 
     @property
     def logs_dir(self) -> Path:

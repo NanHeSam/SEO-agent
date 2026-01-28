@@ -107,6 +107,7 @@ class OpenAIClient:
         existing_posts: list[dict[str, str]],
         count: int = 20,
         fields: list[str] | None = None,
+        country: str | None = None,
     ) -> list[str]:
         """Suggest SEO keywords based on existing content."""
         system_prompt = """You are an SEO expert specializing in keyword research.
@@ -118,15 +119,18 @@ Output ONLY a JSON array of keyword strings, nothing else."""
             fields or ["title"],
         )
         existing_content = "\n".join(f"- {line}" for line in context_lines)
+        country_line = f"\nTarget country context: {country}" if country else ""
 
         user_prompt = f"""Existing blog posts:
  {existing_content}
+{country_line}
 
 Suggest {count} unique, high-potential keywords that:
 1. Are NOT already covered by existing posts
 2. Have commercial or informational search intent
 3. Are long-tail keywords (3-5 words) for better ranking potential
 4. Are relevant to job seekers and career development
+5. If a target country context is provided, include country-specific variants where appropriate (e.g., "in Canada")
 
 Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
 
@@ -170,6 +174,7 @@ Return ONLY a JSON array of strings like: ["keyword 1", "keyword 2", ...]"""
         existing_posts: list[dict[str, str]],
         keywords: list[str] | None = None,
         fields: list[str] | None = None,
+        country: str | None = None,
     ) -> dict[str, Any]:
         """Suggest a unique blog topic that doesn't duplicate existing content."""
         system_prompt = """You are an SEO content strategist.
@@ -184,16 +189,19 @@ Output ONLY valid JSON with the specified format, nothing else."""
         keywords_context = ""
         if keywords:
             keywords_context = f"\nTarget keywords to incorporate: {', '.join(keywords[:10])}"
+        country_context = f"\nTarget country context: {country}" if country else ""
 
         user_prompt = f"""Existing blog posts (AVOID duplicating these):
  {existing_content}
  {keywords_context}
+ {country_context}
 
 Suggest ONE unique blog topic that:
 1. Is NOT covered by any existing post
 2. Has high search potential
 3. Provides unique value to job seekers
 4. Can rank for the target keywords (if provided)
+ 5. If a target country context is provided, localize the topic to that country (e.g., job search norms, visa, salaries)
 
 Return JSON with this exact format:
 {{
@@ -237,11 +245,18 @@ Return JSON with this exact format:
         search_intent: str,
         word_count: int = 2000,
         existing_posts: list[dict[str, str]] | None = None,
+        country: str | None = None,
     ) -> dict[str, Any]:
         """Generate a full SEO-optimized article."""
         system_prompt = """You are an expert SEO content writer specializing in career and job search content.
 Write engaging, informative articles that rank well in search engines.
 Follow SEO best practices for keyword placement and content structure.
+
+Style constraints (must follow exactly):
+- Do NOT use em dashes (—) or en dashes (–) anywhere in the output.
+- Avoid double-hyphen dashes ("--") as punctuation.
+- Use commas, parentheses, colons, or short sentences instead.
+
 Output the article in Markdown format with proper heading hierarchy."""
 
         cross_links_context = ""
@@ -255,6 +270,13 @@ Output the article in Markdown format with proper heading hierarchy."""
 Available posts for internal linking (include 3-4 relevant links naturally):
 {links_list}"""
 
+        country_context = ""
+        if country:
+            country_context = f"""
+
+**Country context:** {country}
+Write as if the reader is job searching in this country. Use locally relevant examples, terminology, and references (visa/work authorization, common hiring platforms, salary norms) when applicable."""
+
         user_prompt = f"""Write a comprehensive SEO article with these specifications:
 
 **Topic:** {topic}
@@ -262,6 +284,7 @@ Available posts for internal linking (include 3-4 relevant links naturally):
 **Secondary Keywords:** {', '.join(secondary_keywords)}
 **Search Intent:** {search_intent}
 **Target Word Count:** {word_count} words
+{country_context}
 {cross_links_context}
 
 **SEO Requirements:**
@@ -275,6 +298,10 @@ Available posts for internal linking (include 3-4 relevant links naturally):
 4. Include a meta description (150-160 characters)
 5. Match the search intent throughout the content
 6. Add internal links to relevant existing posts (if provided)
+
+**Style Requirements:**
+1. Do NOT use em dashes (—) or en dashes (–)
+2. Prefer commas/parentheses or shorter sentences instead of dash punctuation
 
 **Output Format:**
 Start with YAML frontmatter containing:
@@ -420,7 +447,7 @@ Then the full article in Markdown format."""
     ) -> str:
         """Generate an optimized prompt for image generation."""
         system_prompt = """You are an expert at creating image generation prompts.
-Create prompts that result in professional, blog-appropriate images.
+Create prompts that result in professional, blog-appropriate cartoon/illustration-style images.
 Output ONLY the image prompt, nothing else."""
 
         user_prompt = f"""Create an image generation prompt for a blog article image.
@@ -430,10 +457,11 @@ Article Context: {article_context[:500]}
 Primary Keyword: {primary_keyword}
 
 Requirements:
-1. Professional, clean style suitable for a career/job search blog
-2. No text or words in the image
-3. Modern, minimalist aesthetic
-4. Relevant to the section content
+1. Cartoon/illustration style (NOT photorealistic): clean line art, flat/vector look, soft gradients, friendly characters where appropriate
+2. Professional and clean, suitable for a career/job search blog
+3. No text, words, logos, or watermarks in the image
+4. Modern, minimalist composition with clear focal subject
+5. Relevant to the section content
 
 Return ONLY the image prompt (1-2 sentences)."""
 

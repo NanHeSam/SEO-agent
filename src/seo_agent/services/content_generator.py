@@ -24,6 +24,7 @@ class ContentGeneratorService:
         search_intent: str,
         word_count: int | None = None,
         existing_posts: list[dict[str, str]] | None = None,
+        country: str | None = None,
     ) -> Article:
         """Generate a complete SEO-optimized article."""
         target_word_count = word_count or self.default_word_count
@@ -36,6 +37,7 @@ class ContentGeneratorService:
             search_intent=search_intent,
             word_count=target_word_count,
             existing_posts=existing_posts,
+            country=country,
         )
 
         # Calculate reading time (average 200 words per minute)
@@ -168,6 +170,11 @@ Return JSON with this format:
         system_prompt = """You are an SEO content editor.
 Improve the article based on the provided feedback.
 Maintain SEO optimization while making improvements.
+Style constraints (must follow exactly):
+- Do NOT use em dashes (—) or en dashes (–) anywhere in the output.
+- Avoid double-hyphen dashes ("--") as punctuation.
+- Use commas, parentheses, colons, or short sentences instead.
+
 Output the improved article in Markdown format."""
 
         user_prompt = f"""Original Article:

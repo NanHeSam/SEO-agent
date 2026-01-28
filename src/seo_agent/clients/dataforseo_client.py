@@ -46,6 +46,9 @@ class DataForSEOClient(BaseAsyncClient):
                     "status_code": task.get("status_code"),
                     "status_message": task.get("status_message"),
                     "error_message": task.get("error_message"),
+                    # DataForSEO often echoes the request under `data` (useful for debugging
+                    # schema/field issues like 40501 Invalid Field).
+                    "data": task.get("data"),
                     "id": task.get("id"),
                 })
         return task_errors
@@ -134,6 +137,17 @@ class DataForSEOClient(BaseAsyncClient):
         self._ensure_success(operation, data)
         return data
 
+    async def _get_json(self, endpoint: str, *, operation: str, **kwargs: Any) -> dict[str, Any]:
+        try:
+            response = await self.get(endpoint, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            self._handle_http_error(operation, exc)
+            raise
+
+        data = response.json()
+        self._ensure_success(operation, data)
+        return data
+
     def __init__(
         self,
         api_credentials: str,
@@ -159,7 +173,6 @@ class DataForSEOClient(BaseAsyncClient):
     async def get_keyword_suggestions(
         self,
         seed_keyword: str,
-        location_code: int = 2840,  # United States
         language_code: str = "en",
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -168,15 +181,13 @@ class DataForSEOClient(BaseAsyncClient):
 
         Uses: POST /v3/dataforseo_labs/google/keyword_suggestions/live
         """
-        payload = [
-            {
-                "keyword": seed_keyword,
-                "location_code": location_code,
-                "language_code": language_code,
-                "limit": limit,
-                "include_seed_keyword": True,
-            }
-        ]
+        payload_item: dict[str, Any] = {
+            "keyword": seed_keyword,
+            "language_code": language_code,
+            "limit": limit,
+            "include_seed_keyword": True,
+        }
+        payload = [payload_item]
 
         response = await self._post_json(
             "/v3/dataforseo_labs/google/keyword_suggestions/live",
@@ -210,7 +221,6 @@ class DataForSEOClient(BaseAsyncClient):
     async def get_keyword_ideas(
         self,
         keywords: list[str],
-        location_code: int = 2840,
         language_code: str = "en",
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -219,14 +229,12 @@ class DataForSEOClient(BaseAsyncClient):
 
         Uses: POST /v3/dataforseo_labs/google/keyword_ideas/live
         """
-        payload = [
-            {
-                "keywords": keywords,
-                "location_code": location_code,
-                "language_code": language_code,
-                "limit": limit,
-            }
-        ]
+        payload_item: dict[str, Any] = {
+            "keywords": keywords,
+            "language_code": language_code,
+            "limit": limit,
+        }
+        payload = [payload_item]
 
         response = await self._post_json(
             "/v3/dataforseo_labs/google/keyword_ideas/live",
@@ -239,7 +247,6 @@ class DataForSEOClient(BaseAsyncClient):
     async def get_bulk_keyword_difficulty(
         self,
         keywords: list[str],
-        location_code: int = 2840,
         language_code: str = "en",
     ) -> dict[str, dict[str, Any]]:
         """
@@ -247,19 +254,42 @@ class DataForSEOClient(BaseAsyncClient):
 
         Uses: POST /v3/dataforseo_labs/google/bulk_keyword_difficulty/live
         """
-        payload = [
-            {
-                "keywords": keywords,
-                "location_code": location_code,
-                "language_code": language_code,
-            }
-        ]
+        payload_item: dict[str, Any] = {
+            "keywords": keywords,
+            "language_code": language_code,
+        }
+        payload = [payload_item]
 
-        response = await self._post_json(
-            "/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
-            json=payload,
-            operation="get_bulk_keyword_difficulty",
-        )
+        try:
+            response = await self._post_json(
+                "/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
+                json=payload,
+                operation="get_bulk_keyword_difficulty",
+            )
+        except DataForSEOError as exc:
+            # Some DataForSEO accounts return 40501 "Invalid Field" for location fields
+            # (location_name/location_code) even when the request payload doesn't include
+            # them (they may be injected by account defaults). In this workflow, KD is
+            # used as a filter signal; we degrade gracefully by returning an empty map
+            # (callers treat missing KD as 0).
+            if any(
+                (err.get("status_code") == 40501)
+                and isinstance(err.get("status_message"), str)
+                and err["status_message"].lower().startswith("invalid field:")
+                and (
+                    "location_name" in err["status_message"].lower()
+                    or "location_code" in err["status_message"].lower()
+                )
+                for err in (exc.task_errors or [])
+            ):
+                logger = get_logger()
+                if logger:
+                    logger.log_custom(
+                        "DATAFORSEO WARNING: bulk_keyword_difficulty_disabled",
+                        {"reason": str(exc), "keywords_count": len(keywords)},
+                    )
+                return {}
+            raise
 
         result = self._extract_difficulty_data(response)
 
@@ -285,17 +315,20 @@ class DataForSEOClient(BaseAsyncClient):
 
         Uses: POST /v3/keywords_data/google_ads/search_volume/live
         """
-        payload = [
-            {
-                "keywords": keywords,
-                "location_code": location_code,
-                "language_code": language_code,
-            }
-        ]
+        # Important: to avoid endpoint-specific schema issues (some accounts return
+        # 40501 "Invalid Field: 'location_code'"), we request WORLDWIDE data here by
+        # omitting all location fields. Location targeting is still used for DataForSEO
+        # Labs endpoints elsewhere (keyword ideas/difficulty).
+        _ = location_code  # kept for API compatibility; intentionally unused
+
+        payload_item: dict[str, Any] = {
+            "keywords": keywords,
+            "language_code": language_code,
+        }
 
         response = await self._post_json(
             "/v3/keywords_data/google_ads/search_volume/live",
-            json=payload,
+            json=[payload_item],
             operation="get_search_volume",
         )
 
@@ -335,10 +368,34 @@ class DataForSEOClient(BaseAsyncClient):
 
         return volume_map
 
+    async def get_google_ads_locations(
+        self,
+        country_iso_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get the list of supported Google Ads location codes.
+
+        Uses: GET /v3/keywords_data/google_ads/locations
+        """
+        endpoint = "/v3/keywords_data/google_ads/locations"
+        if country_iso_code:
+            endpoint = f"{endpoint}/{country_iso_code.lower()}"
+
+        response = await self._get_json(
+            endpoint,
+            operation="get_google_ads_locations",
+        )
+
+        locations: list[dict[str, Any]] = []
+        for task in response.get("tasks", []):
+            if task.get("status_code") != 20000:
+                continue
+            locations.extend(task.get("result", []))
+        return locations
+
     async def get_keyword_metrics(
         self,
         keywords: list[str],
-        location_code: int = 2840,
         language_code: str = "en",
     ) -> list[dict[str, Any]]:
         """
@@ -349,7 +406,6 @@ class DataForSEOClient(BaseAsyncClient):
         # Get search volume from keyword ideas
         ideas_response = await self.get_keyword_ideas(
             keywords=keywords,
-            location_code=location_code,
             language_code=language_code,
             limit=len(keywords) * 2,  # Get extra to ensure we find all
         )
@@ -357,7 +413,6 @@ class DataForSEOClient(BaseAsyncClient):
         # Get keyword difficulty
         difficulty_data = await self.get_bulk_keyword_difficulty(
             keywords=keywords,
-            location_code=location_code,
             language_code=language_code,
         )
 

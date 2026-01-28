@@ -76,6 +76,8 @@ class MarkdownWriter:
                 elif featured.file_path:
                     data["featured_image"] = f"../images/{featured.file_path.name}"
                 data["featured_image_alt"] = featured.metadata.alt_text
+                if featured.metadata.short_name:
+                    data["featured_image_name"] = featured.metadata.short_name
 
         # Add SEO fields
         data["seo"] = {
@@ -117,7 +119,8 @@ class MarkdownWriter:
                 if img:
                     # Add blank line and image after heading
                     result_lines.append("")
-                    result_lines.append(img.markdown_reference)
+                    result_lines.append(img.markdown_block)
+                    result_lines.append("")
 
         return "\n".join(result_lines)
 
@@ -136,6 +139,7 @@ class MarkdownWriter:
             manifest["images"].append({
                 "filename": img.metadata.filename,
                 "alt_text": img.metadata.alt_text,
+                "short_name": img.metadata.short_name,
                 "caption": img.metadata.caption,
                 "section": img.metadata.section_heading,
                 "prompt": img.prompt,

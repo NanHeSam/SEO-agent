@@ -75,6 +75,7 @@ class JSONWriter:
                 {
                     "filename": img.metadata.filename,
                     "alt_text": img.metadata.alt_text,
+                    "short_name": img.metadata.short_name,
                     "caption": img.metadata.caption,
                     "section_heading": img.metadata.section_heading,
                     "size": img.size,

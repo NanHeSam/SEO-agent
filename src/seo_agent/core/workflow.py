@@ -83,6 +83,55 @@ class WorkflowOrchestrator:
         self.markdown_writer = MarkdownWriter(output_dir=settings.generated_articles_dir)
         self.json_writer = JSONWriter(output_dir=settings.generated_articles_dir)
 
+    def _get_country_context(
+        self,
+        *,
+        interactive: bool,
+        country: str | None = None,
+    ) -> str:
+        """
+        Resolve country context used for topic/article writing.
+        """
+        # If caller provided a country string, return it as-is (non-interactive path).
+        if country is not None and country.strip():
+            return country.strip()
+
+        # Interactive prompt (workflow step)
+        if interactive:
+            options = [
+                "United States",
+                "Canada",
+                "Australia",
+                "Singapore",
+                "India",
+                "China",
+                "United Kingdom",
+                "Ireland",
+            ]
+            default_name = self.settings.default_country
+            default_index = options.index(default_name) + 1 if default_name in options else 1
+
+            console.print("\n[bold]Select country for keyword research (by number):[/bold]")
+            for idx, opt in enumerate(options, 1):
+                suffix = " (default)" if idx == default_index else ""
+                console.print(f"  {idx}. {opt}{suffix}")
+
+            choice = console.input(
+                f"Select country [1-{len(options)}] (default {default_index}): "
+            ).strip()
+
+            if not choice:
+                return options[default_index - 1]
+            if not choice.isdigit():
+                return options[default_index - 1]
+            selected = int(choice)
+            if 1 <= selected <= len(options):
+                return options[selected - 1]
+            return options[default_index - 1]
+
+        # Fallback to settings defaults
+        return self.settings.default_country
+
     async def run_original_workflow(
         self,
         interactive: bool = True,
@@ -90,6 +139,7 @@ class WorkflowOrchestrator:
         max_kd: float | None = None,
         topic_selector: Callable[..., Any] | None = None,
         llm_fields: list[str] | None = None,
+        country: str | None = None,
     ) -> Article | None:
         """
         Run the original workflow:
@@ -104,6 +154,10 @@ class WorkflowOrchestrator:
         min_vol = min_volume or self.settings.default_min_volume
         max_difficulty = max_kd or self.settings.default_max_kd
         existing_titles: list[str] = []
+        country_name = self._get_country_context(
+            interactive=interactive,
+            country=country,
+        )
 
         # Log workflow start
         if self.logger:
@@ -111,6 +165,7 @@ class WorkflowOrchestrator:
                 "min_volume": min_vol,
                 "max_kd": max_difficulty,
                 "interactive": interactive,
+                "country": country_name,
             })
 
         if llm_fields is None:
@@ -141,6 +196,7 @@ class WorkflowOrchestrator:
             keywords = await self.keyword_service.original_workflow(
                 existing_posts=existing_posts,
                 llm_fields=llm_fields,
+                country=country_name,
             )
             progress.update(task, completed=True)
             console.print(f"[green]Found {len(keywords)} keywords[/green]")
@@ -199,7 +255,8 @@ class WorkflowOrchestrator:
             task = progress.add_task("Generating topics...", total=None)
             topics = await self.content_planner.generate_topics_from_keywords(
                 qualified_keywords=qualified,
-                count=5,
+                count=self.settings.default_topic_count,
+                country=country_name,
             )
             progress.update(task, completed=True)
 
@@ -216,7 +273,10 @@ class WorkflowOrchestrator:
                 return None
 
         # Step 6: Select topic
-        if interactive and topic_selector is None:
+        if len(topics) == 1:
+            topic = topics[0]
+            selection_method = "auto_single"
+        elif interactive and topic_selector is None:
             topic = await self._interactive_topic_selection(topics)
             selection_method = "interactive"
         elif topic_selector:
@@ -252,12 +312,14 @@ class WorkflowOrchestrator:
             keyword_group=keyword_group,
             search_intent=search_intent,
             blog_cache=cache,
+            country=country_name,
         )
 
     async def run_alternative_workflow(
         self,
         interactive: bool = True,
         llm_fields: list[str] | None = None,
+        country: str | None = None,
     ) -> Article | None:
         """
         Run the alternative workflow:
@@ -274,6 +336,11 @@ class WorkflowOrchestrator:
 
         if llm_fields is None:
             llm_fields = self._prompt_llm_context_fields() if interactive else ["title"]
+
+        country_name = self._get_country_context(
+            interactive=interactive,
+            country=country,
+        )
 
         with Progress(
             SpinnerColumn(),
@@ -298,11 +365,13 @@ class WorkflowOrchestrator:
             topic, keywords = await self.keyword_service.alternative_workflow(
                 existing_posts=existing_posts,
                 llm_fields=llm_fields,
+                country=country_name,
             )
             progress.update(task, completed=True)
 
         console.print(f"\n[bold]Suggested topic:[/bold] {topic.get('title')}")
         console.print(f"[dim]Keywords: {', '.join(kw.keyword for kw in keywords[:5])}[/dim]")
+        console.print(f"[dim]Country: {country_name}[/dim]")
 
         # Log topic and keywords from alternative workflow
         if self.logger:
@@ -345,6 +414,7 @@ class WorkflowOrchestrator:
             keyword_group=keyword_group,
             search_intent=topic.get("search_intent", "informational"),
             blog_cache=cache,
+            country=country_name,
         )
 
     async def generate_single_article(
@@ -379,6 +449,7 @@ class WorkflowOrchestrator:
             keyword_group=keyword_group,
             search_intent=search_intent,
             blog_cache=cache,
+            country=None,
         )
 
     async def publish_article(
@@ -422,6 +493,7 @@ class WorkflowOrchestrator:
         keyword_group: KeywordGroup,
         search_intent: str,
         blog_cache: BlogCache | None,
+        country: str | None,
     ) -> Article:
         """Generate a complete article with images and cross-links."""
         # Convert API posts to cross-link format
@@ -445,6 +517,7 @@ class WorkflowOrchestrator:
                 secondary_keywords=[kw.keyword for kw in keyword_group.secondary_keywords],
                 search_intent=search_intent,
                 existing_posts=existing_posts[:10],
+                country=country,
             )
             progress.update(task, completed=True)
             console.print(f"[green]Generated {article.metadata.word_count} words[/green]")

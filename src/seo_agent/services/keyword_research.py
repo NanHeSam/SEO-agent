@@ -27,6 +27,8 @@ class KeywordResearchService:
         existing_posts: list[dict[str, str]],
         keyword_count: int = 20,
         llm_fields: list[str] | None = None,
+        *,
+        country: str | None = None,
     ) -> list[Keyword]:
         """
         Original workflow: GPT suggests keywords, DataForSEO validates.
@@ -40,6 +42,7 @@ class KeywordResearchService:
             existing_posts=existing_posts,
             count=keyword_count,
             fields=llm_fields,
+            country=country,
         )
 
         if not suggested_keywords:
@@ -47,7 +50,9 @@ class KeywordResearchService:
 
         # Step 2: Get metrics from DataForSEO
         async with self.dataforseo:
-            metrics_data = await self._get_metrics_for_keywords(suggested_keywords)
+            metrics_data = await self._get_metrics_for_keywords(
+                suggested_keywords,
+            )
 
         # Step 3: Create Keyword objects and filter
         keywords = []
@@ -73,6 +78,8 @@ class KeywordResearchService:
         existing_posts: list[dict[str, str]],
         keyword_count: int = 10,
         llm_fields: list[str] | None = None,
+        *,
+        country: str | None = None,
     ) -> tuple[Any, list[Keyword]]:
         """
         Alternative workflow: GPT suggests topic, DataForSEO generates keywords.
@@ -84,6 +91,7 @@ class KeywordResearchService:
         topic_data = await self.openai.suggest_topic(
             existing_posts=existing_posts,
             fields=llm_fields,
+            country=country,
         )
 
         # Step 2: Use topic to get related keywords from DataForSEO
@@ -95,12 +103,16 @@ class KeywordResearchService:
         async with self.dataforseo:
             suggestions = await self.dataforseo.get_keyword_suggestions(
                 seed_keyword=seed_keyword,
+                language_code="en",
                 limit=keyword_count + 5,  # Get extra to filter
             )
 
             # Get difficulty scores
             kw_strings = [s["keyword"] for s in suggestions[:keyword_count]]
-            difficulty_data = await self.dataforseo.get_bulk_keyword_difficulty(kw_strings)
+            difficulty_data = await self.dataforseo.get_bulk_keyword_difficulty(
+                kw_strings,
+                language_code="en",
+            )
 
         # Merge and create Keyword objects
         keywords = []
@@ -129,10 +141,16 @@ class KeywordResearchService:
     ) -> Any:
         """Get metrics for a list of keywords."""
         # Get exact search volume for keywords
-        volume_data = await self.dataforseo.get_search_volume(keywords)
+        volume_data = await self.dataforseo.get_search_volume(
+            keywords,
+            language_code="en",
+        )
 
         # Get keyword difficulty
-        difficulty = await self.dataforseo.get_bulk_keyword_difficulty(keywords)
+        difficulty = await self.dataforseo.get_bulk_keyword_difficulty(
+            keywords,
+            language_code="en",
+        )
 
         # Build metrics map combining both data sources
         metrics_map = {}
@@ -189,7 +207,7 @@ class KeywordResearchService:
     async def generate_topics_from_keywords(
         self,
         keywords: list[Keyword],
-        count: int = 5,
+        count: int = 1,
     ) -> list[Any]:
         """Generate topic suggestions from qualified keywords."""
         keyword_strings = [kw.keyword for kw in keywords[:10]]

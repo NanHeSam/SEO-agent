@@ -6,6 +6,7 @@ SEO article generation automation CLI tool for jobnova.ai/blog.
 
 - Automated keyword research using DataForSEO API
 - SEO-optimized article generation using OpenAI GPT-5.2
+- Country selection for geo-targeted keyword research
 - Image generation with DALL-E 3
 - Optional image upload to Libaspace admin file API (cloud URLs embedded in article)
 - Internal cross-linking with fuzzy matching
@@ -28,6 +29,12 @@ cp .env.example .env
 Required environment variables:
 - `OPENAI_API_KEY` - OpenAI API key
 - `DATAFORSEO_API_CREDENTIALS` - DataForSEO credentials (base64-encoded `login:password`)
+
+Optional workflow environment variables:
+- `DEFAULT_TOPIC_COUNT` - Number of topic ideas to generate from qualified keywords (default: `1`)
+- `DEFAULT_COUNTRY` - Default country name (display only; used in logs/prompts)
+- `DEFAULT_LOCATION_CODE` - DataForSEO `location_code` used for keyword research (default: `2840` for United States). If you don’t want to deal with codes, set `DEFAULT_COUNTRY` to `United States`, `Canada`, or `Singapore` and the code will be auto-selected.
+- `DEFAULT_LANGUAGE_CODE` - DataForSEO `language_code` used for keyword research (default: `en`)
 
 Optional environment variables for posting:
 - `BLOG_API_ADMIN_URL` - Blog admin API base URL (default: `https://test-api-admin.libaspace.com/api`)
@@ -53,21 +60,21 @@ echo -n "your_login:your_password" | base64
 | Step | Description | Command | Status |
 |------|-------------|---------|--------|
 | **1** | Scan blog for existing titles/content | `seo-agent scrape` | ✅ |
-| **2** | LLM suggests new keywords | `seo-agent research --workflow original` | ✅ |
+| **2** | Select country (geo targeting for keyword research) | `seo-agent workflow --interactive` or `--country ...` | ✅ |
+| **3** | LLM suggests new keywords | `seo-agent research --workflow original` | ✅ |
 | **4** | Filter: KD < 30, volume > 5k | `--min-volume 5000 --max-kd 30` | ✅ |
-| **5** | LLM generates topics from qualified keywords | `seo-agent workflow --mode original` | ✅ |
-| **6** | Generate SEO blog (topic + keywords + intent) | `seo-agent generate` | ✅ |
-| **7** | Humanize AI content (reduce AI detection) | ❌ Not implemented | |
-| **8** | Generate images (3-4 per 1k words) + featured image | Automatic | ✅ |
-| **8.1** | Upload images and embed cloud URLs (optional) | Automatic when `BLOG_API_TOKEN` is set | ✅ |
-| **9** | Cross-link to other blogs (3-4 per 1k words) | Automatic | ✅ |
+| **5** | LLM generates 1 topic and drafts the article | `seo-agent workflow --mode original` | ✅ |
+| **6** | Generate images (3-4 per 1k words) + featured image | Automatic | ✅ |
+| **6.1** | Upload images and embed cloud URLs (optional) | Automatic when `BLOG_API_TOKEN` is set | ✅ |
+| **7** | Cross-link to other blogs (3-4 per 1k words) | Automatic | ✅ |
+| **8** | Humanize AI content (reduce AI detection) | ❌ Not implemented | |
 
 ### Alternative Workflow (Steps 4* and 5*)
 
 | Step | Description | Command |
 |------|-------------|---------|
-| **4*** | LLM suggests unique topic (no duplicates) | `seo-agent research --workflow alternative` |
-| **5*** | API generates 10-11 keywords for the topic | Automatic in alternative workflow |
+| **4*** | LLM suggests a unique topic (single topic) | `seo-agent research --workflow alternative` |
+| **5*** | API generates 10-11 keywords and workflow drafts the article | Automatic in alternative workflow |
 
 ---
 
@@ -91,11 +98,17 @@ seo-agent scrape --include-content
 **Original Workflow** - GPT suggests keywords, DataForSEO validates:
 ```bash
 seo-agent research --workflow original --min-volume 5000 --max-kd 30
+
+# With country targeting (overrides DEFAULT_LOCATION_CODE/DEFAULT_LANGUAGE_CODE)
+seo-agent research --workflow original --country "USA"
 ```
 
 **Alternative Workflow** - GPT suggests topic, DataForSEO generates keywords:
 ```bash
 seo-agent research --workflow alternative
+
+# With country targeting
+seo-agent research --workflow alternative --country "Singapore"
 ```
 
 ### Step 4: Article Generation
@@ -115,12 +128,17 @@ seo-agent generate "Best Remote Jobs in 2025" \
 
 ### Full Automated Workflow
 
+Workflow now generates a single topic and drafts the article automatically.
+
 ```bash
-# Original workflow (interactive)
+# Original workflow (interactive, generates 1 topic + article)
 seo-agent workflow --mode original --interactive
 
-# Alternative workflow
+# Alternative workflow (generates 1 topic + article)
 seo-agent workflow --mode alternative --interactive
+
+# Country targeting without interactive prompt
+seo-agent workflow --mode original --no-interactive --country "Canada"
 
 # Run workflow and post on completion
 seo-agent workflow --mode original --interactive --post

@@ -10,6 +10,7 @@ from seo_agent.models.image import (
     ImageMetadata,
     generate_alt_text,
     generate_image_filename,
+    generate_short_name,
 )
 
 
@@ -86,6 +87,7 @@ class ImageGeneratorService:
             section_heading=section_heading,
             keyword=primary_keyword,
         )
+        short_name = generate_short_name(section_heading)
 
         # Create output path
         output_path = self.output_dir / filename
@@ -101,6 +103,7 @@ class ImageGeneratorService:
         metadata = ImageMetadata(
             filename=filename,
             alt_text=alt_text,
+            short_name=short_name,
             caption=section_heading,
             section_heading=section_heading,
             primary_keyword=primary_keyword,
@@ -160,7 +163,11 @@ class ImageGeneratorService:
         )
 
         # Enhance prompt for featured image
-        enhanced_prompt = f"Professional blog featured image: {prompt}. Modern, clean design suitable for article header."
+        enhanced_prompt = (
+            "Cartoon/illustration-style blog featured image (NOT photorealistic): "
+            f"{prompt}. Clean line art, flat/vector look, soft gradients, modern minimalist composition. "
+            "No text, logos, or watermarks."
+        )
 
         filename = generate_image_filename(
             topic_slug=article.metadata.slug,
@@ -177,9 +184,13 @@ class ImageGeneratorService:
             output_path=output_path,
         )
 
+        featured_alt = generate_alt_text(article.metadata.title, article.metadata.primary_keyword)
+        featured_short_name = generate_short_name(article.metadata.title)
+
         metadata = ImageMetadata(
             filename=filename,
-            alt_text=f"{article.metadata.title} - {article.metadata.primary_keyword}",
+            alt_text=featured_alt,
+            short_name=featured_short_name,
             caption=article.metadata.title,
             section_heading=article.metadata.title,
             primary_keyword=article.metadata.primary_keyword,
@@ -203,9 +214,29 @@ class ImageGeneratorService:
         content = article.content
         sections = self._extract_sections(content)
 
+        # Insert featured image (index == 0) near the top (after H1 when present)
+        featured = next((img for img in images if img.index == 0), None)
+        if featured:
+            # Avoid duplicating if already present.
+            featured_token = featured.public_url or (featured.file_path.name if featured.file_path else featured.metadata.filename)
+            if featured_token and featured_token not in content:
+                h1_pattern = r'^(#\s+.+)$'
+                if re.search(h1_pattern, content, flags=re.MULTILINE):
+                    content = re.sub(
+                        h1_pattern,
+                        lambda m: f"{m.group(1)}\n\n{featured.markdown_block}\n\n",
+                        content,
+                        count=1,
+                        flags=re.MULTILINE,
+                    )
+                else:
+                    content = f"{featured.markdown_block}\n\n{content}"
+
         # Map images to sections by heading
         image_map = {}
         for img in images:
+            if img.index == 0:
+                continue
             heading = img.metadata.section_heading
             if heading:
                 image_map[heading.lower()] = img
@@ -218,7 +249,7 @@ class ImageGeneratorService:
             if img:
                 # Find the heading in content and insert image after it
                 pattern = rf'(##\s+{re.escape(heading)})\n'
-                replacement = rf'\1\n\n{img.markdown_reference}\n'
+                replacement = rf'\1\n\n{img.markdown_block}\n\n'
                 content = re.sub(pattern, replacement, content, count=1, flags=re.IGNORECASE)
 
         return content
@@ -230,8 +261,9 @@ class ImageGeneratorService:
         """Get Markdown formatted image references."""
         lines = []
         for img in images:
-            lines.append(f"- {img.markdown_reference}")
+            lines.append(f"- {img.markdown_image}")
             lines.append(f"  - Alt: {img.metadata.alt_text}")
+            lines.append(f"  - Name: {img.metadata.short_name}")
             lines.append(f"  - Caption: {img.metadata.caption}")
         return "\n".join(lines)
 
